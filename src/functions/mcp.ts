@@ -3,7 +3,8 @@
 // See CLAUDE.md "MCP transport contract" for the full contract.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { TOOLS, TOOL_MAP } from '../tools/registry'
+import { ToolDefinition } from '../types'
+import { pingTool } from '../tools/ping'
 
 const SERVER_NAME = 'library-mcp'
 const SERVER_VERSION = '0.1.0'
@@ -57,6 +58,17 @@ function rpcError(id: JsonRpcId, code: number, message: string): HttpResponseIni
 // Accepted notification — no response body is sent (HTTP 202).
 const NO_RESPONSE = Symbol('no-response')
 
+async function getRegisteredTools(): Promise<ToolDefinition[]> {
+  const { TOOLS } = await import('../tools/registry')
+  return TOOLS
+}
+
+async function getRegisteredTool(name: string): Promise<ToolDefinition | undefined> {
+  if (name === pingTool.name) return pingTool
+  const { TOOL_MAP } = await import('../tools/registry')
+  return TOOL_MAP.get(name)
+}
+
 async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promise<unknown | typeof NO_RESPONSE> {
   switch (req.method) {
     case 'initialize': {
@@ -82,7 +94,7 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
 
     case 'tools/list':
       return {
-        tools: TOOLS.map(({ name, description, inputSchema }) => ({
+        tools: (await getRegisteredTools()).map(({ name, description, inputSchema }) => ({
           name,
           description,
           inputSchema
@@ -102,7 +114,7 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
       if (args === null || typeof args !== 'object' || Array.isArray(args)) {
         throw new RpcError(INVALID_PARAMS, 'tools/call "arguments" must be an object when provided')
       }
-      const tool = TOOL_MAP.get(name)
+      const tool = await getRegisteredTool(name)
       if (!tool) {
         throw new RpcError(INVALID_PARAMS, `Unknown tool: ${name}`)
       }
