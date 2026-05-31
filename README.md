@@ -72,7 +72,8 @@ Set these as **Application settings** on the Function App (and in a local
 
 Plus the runtime settings Azure Functions itself needs:
 `FUNCTIONS_WORKER_RUNTIME=node`, `FUNCTIONS_EXTENSION_VERSION=~4`,
-`WEBSITE_NODE_DEFAULT_VERSION=~20`, and `AzureWebJobsStorage`.
+`WEBSITE_NODE_DEFAULT_VERSION=~20`, `FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR=true`,
+and `AzureWebJobsStorage`.
 
 ### Prerequisites
 
@@ -116,6 +117,7 @@ curl -s -X POST "$URL" -H 'Content-Type: application/json' \
 ```bash
 npm install
 npm run build
+npm run smoke:entrypoint   # verifies package.json main resolves and imports cleanly
 func azure functionapp publish <app-name>
 ```
 
@@ -123,6 +125,16 @@ Compiled output ships from `dist/`; `.funcignore` excludes `src/**/*.ts`,
 `local.settings.json`, and tests from the package.
 
 Endpoint: `POST https://<app-name>.azurewebsites.net/api/mcp`
+
+### Troubleshoot Node worker startup / AZFD0005
+
+If Azure reports `AZFD0005` with `node exited with code 1` or `WorkerFunctionMetadataProvider.GetFunctionMetadataAsync`, treat the AZFD code as the wrapper and chase the Node worker import failure first. The repository includes a deployment smoke check:
+
+```bash
+npm run smoke:entrypoint
+```
+
+This rebuilds TypeScript, expands the `package.json` `main` glob, and loads every compiled Azure Functions entry point. A missing `dist` file or top-level startup exception fails locally/CI before Azure has to discover metadata. Keep `FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR=true` enabled in Function App settings so entry-point exceptions are surfaced clearly in Application Insights after deployment.
 
 ---
 
