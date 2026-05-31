@@ -13,18 +13,20 @@ See [`CLAUDE.md`](./CLAUDE.md) for the full build schema and design rationale.
 
 ---
 
-## The four tools
+## The tools
+
+The surface is five role-shaped tools rather than a dozen single-purpose ones. The
+reads fold into `library_info` (pick a `resource`) and the writes fold into
+`library_write` (pick an `operation`), so the same capabilities are exposed through
+far fewer top-level tools.
 
 | Tool | What it does |
 |---|---|
-| `library_ingest` | Store a raw source document; chunk, embed (dense + sparse), register in `raw_manifest.json`. Does not touch the wiki. |
+| `library_ping` | No-dependency health/liveness check — call it first to confirm the transport before touching storage. Returns safe runtime diagnostics (missing Function App settings) without exposing secret values. |
+| `library_info` | Read-only inspection. `resource: instructions` (operating doctrine), `schema` (per-domain schema; needs `domain`), `pages` (curated catalogue; optional `domain`/`status`), `page` (one page; needs `filename`). |
 | `library_query` | Hybrid retrieval (Qdrant RRF) over curated wiki pages (default) and/or raw chunks, with confidence/domain filtering and mechanical gap detection. |
-| `library_update` | The only curated wiki write path. Deterministic frontmatter, previous-version archival to `history/`, re-embedding, `manifest.json` + `index.md` regeneration. |
+| `library_write` | The only mutating tool (librarian mode). `operation: ingest` (store + chunk + embed a raw source), `register_source` (register a citable source by metadata), `update_page` (the only curated wiki write path — deterministic frontmatter, history archival, re-embedding, manifest/index regeneration), `update_schema` (write a per-domain schema), `deprecate_page` (retire a page). |
 | `library_lint` | Read-only mechanical health checks (orphans, broken refs, missing citations, open contradictions, stale embeddings, unindexed sources, manifest/blob drift). |
-
-A no-dependency `library_ping` health tool is also exposed — call it first to
-confirm the transport before touching storage. It returns safe runtime diagnostics
-that identify missing Function App settings without exposing secret values.
 
 ---
 
@@ -156,11 +158,11 @@ Add it to your MCP client as an **HTTP** server (not SSE) pointing at
 
 Once connected, run the full lifecycle to prove the system end to end:
 
-1. **Ingest** a source — `library_ingest` (e.g. this repo's `CLAUDE.md`,
-   `source_type: primary`, `domain: ai-knowledge-layer`).
+1. **Ingest** a source — `library_write` (`operation: ingest`, e.g. this repo's
+   `CLAUDE.md`, `source_type: primary`, `domain: ai-knowledge-layer`).
 2. **Query** it — `library_query` with `scope: raw` to confirm chunks return.
 3. Switch to librarian/editor mode (`LIBRARY_MCP_MODE=librarian`) before write tests.
-4. **Create** a curated page — `library_update`.
+4. **Create** a curated page — `library_write` (`operation: update_page`).
 5. **Query** the wiki — `library_query` (default `scope: wiki`) returns the page.
 6. **Update** the page — confirm the previous version lands in `history/`, the
    `manifest.json` `updated` timestamp changes, and the Qdrant payload `updated`
@@ -173,16 +175,15 @@ Once connected, run the full lifecycle to prove the system end to end:
 
 The server defaults to **read-only agent mode** (`LIBRARY_MCP_MODE=read_only`). In
 that mode `tools/list` exposes only safe inspection and retrieval tools:
-`library_ping`, `library_instructions`, `library_get_schema`, `library_list_pages`,
-`library_get_page`, `library_query`, and `library_lint`.
+`library_ping`, `library_info`, `library_query`, and `library_lint`.
 
 Set `LIBRARY_MCP_MODE=librarian` only for editor workflows. Librarian mode also
-exposes mutating tools: `library_ingest`, `library_register_source`,
-`library_update`, `library_update_schema`, and `library_deprecate_page`.
+exposes the mutating `library_write` tool (operations: `ingest`, `register_source`,
+`update_page`, `update_schema`, `deprecate_page`).
 
 For tests, prefer a disposable `library_id`. If a curated test page lands in a
-shared library, retire it with `library_deprecate_page`; deprecated pages are
-excluded from default wiki queries.
+shared library, retire it with `library_write` (`operation: deprecate_page`);
+deprecated pages are excluded from default wiki queries.
 
 `library_query` is domain-scoped by default: pass `domain` with the normal
 `scope: "wiki"` default. Set `allow_cross_domain: true` only when deliberately

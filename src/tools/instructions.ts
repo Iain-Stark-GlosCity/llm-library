@@ -23,11 +23,11 @@ const DOCTRINE = {
   ],
 
   librarian_workflow: [
-    '0. Get the domain schema (library_get_schema) to learn domain-specific rules; inherit the global doctrine if none.',
-    '1. Ingest the raw source (library_ingest) or register it (library_register_source).',
+    '0. Get the domain schema (library_info resource: schema) to learn domain-specific rules; inherit the global doctrine if none.',
+    '1. Ingest the raw source (library_write operation: ingest) or register it (library_write operation: register_source).',
     '2. Query raw evidence and existing curated pages (library_query), scoped to the known domain by default.',
     '3. Decide whether the source adds, changes, or contradicts current knowledge.',
-    '4. Update the concept page(s) (library_update) with sources[] and related[] links.',
+    '4. Update the concept page(s) (library_write operation: update_page) with sources[] and related[] links.',
     '5. Update or create the domain synthesis page if the domain now has 3+ active pages or the synthesis is stale.',
     '6. Run library_lint.',
     '7. Repair metadata, links, and citations flagged by lint.',
@@ -35,17 +35,19 @@ const DOCTRINE = {
   ],
 
   tool_roles: {
-    library_ping: 'Liveness check.',
-    library_instructions: 'This operating doctrine.',
-    library_get_schema: 'Read the per-domain schema layered on top of this doctrine.',
-    library_list_pages: 'List the curated catalogue (from manifest.json).',
-    library_get_page: 'Fetch a single curated page by filename.',
-    library_query: 'Hybrid retrieval over curated pages (default) and/or raw chunks. Requires domain by default; set allow_cross_domain only for deliberate discovery.',
-    library_ingest: 'Store raw source material: chunk, embed, index.',
-    library_register_source: 'Register a citable source by metadata, without a full ingest.',
-    library_update: 'Create or update a curated wiki page (the only curated write path).',
-    library_update_schema: 'Create or overwrite a per-domain schema file.',
-    library_deprecate_page: 'Mark a curated page deprecated as a cleanup/retirement path.',
+    library_ping: 'Liveness check (dependency-light).',
+    library_info:
+      'Read-only inspection. Pick a resource: "instructions" (this doctrine), "schema" ' +
+      '(per-domain schema layered on this doctrine), "pages" (curated catalogue from ' +
+      'manifest.json), "page" (a single curated page by filename).',
+    library_query:
+      'Hybrid retrieval over curated pages (default) and/or raw chunks. Requires domain ' +
+      'by default; set allow_cross_domain only for deliberate discovery.',
+    library_write:
+      'The only mutating tool (librarian mode only). Pick an operation: "ingest" (store + ' +
+      'chunk + embed raw source), "register_source" (register a citable source by metadata), ' +
+      '"update_page" (the only curated wiki write path), "update_schema" (create/overwrite a ' +
+      'per-domain schema), "deprecate_page" (retire a page).',
     library_lint: 'Mechanical health checks over the wiki.'
   },
 
@@ -63,12 +65,12 @@ const DOCTRINE = {
   },
 
   status_model:
-    'library_update defaults new pages to status: draft. Promote to active deliberately, ' +
-    'once the page has sources, inline citations, and reviewed_by/reviewed_at metadata. ' +
-    'Use library_deprecate_page or status: deprecated to retire a page; deprecated pages are excluded from default queries.',
+    'library_write (operation: update_page) defaults new pages to status: draft. Promote to active ' +
+    'deliberately, once the page has sources, inline citations, and reviewed_by/reviewed_at metadata. ' +
+    'Use library_write (operation: deprecate_page) or status: deprecated to retire a page; deprecated pages are excluded from default queries.',
 
   modes:
-    'Default LIBRARY_MCP_MODE is read_only, exposing only query/retrieval/lint tools. Set LIBRARY_MCP_MODE=librarian to expose library_ingest, library_register_source, library_update, library_update_schema, and library_deprecate_page.'
+    'Default LIBRARY_MCP_MODE is read_only, exposing only the read tools: library_ping, library_info, library_query, and library_lint. Set LIBRARY_MCP_MODE=librarian to additionally expose the mutating library_write tool (operations: ingest, register_source, update_page, update_schema, deprecate_page).'
 }
 
 const inputSchema = {
