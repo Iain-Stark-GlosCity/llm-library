@@ -15,7 +15,13 @@ export interface SourceEntry {
   created: string
   chunks_indexed: number
   embedding_status: 'ok' | 'failed'
-  content_hash: string
+  content_hash?: string
+  // 'ingested' = full raw blob + vectors. 'registered' = metadata-only citation
+  // anchor created by library_register_source (no blob, no vectors). Defaults to
+  // 'ingested' when absent for backwards compatibility.
+  kind?: 'ingested' | 'registered'
+  // false for metadata-only registered sources; lint skips the indexing check for them.
+  indexed?: boolean
 }
 
 export interface RawManifest {

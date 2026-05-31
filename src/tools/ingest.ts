@@ -125,7 +125,9 @@ async function ingestImpl(input: unknown): Promise<DomainEnvelope> {
     created: now.toISOString(),
     chunks_indexed: chunksIndexed,
     embedding_status: embeddingStatus,
-    content_hash: hash
+    content_hash: hash,
+    kind: 'ingested',
+    indexed: embeddingStatus === 'ok'
   })
   try {
     const w = await writeRawManifest(rawManifest, rawEtag)

@@ -139,10 +139,12 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
       const blob = await readBlob(wiki, `pages/${p.filename}`)
       results.push({
         type: 'wiki_page',
+        kind: 'curated', // maintained knowledge record
         filename: p.filename,
         title: p.title,
         content: blob ? stripFrontmatter(blob.content) : '',
         confidence: p.confidence,
+        status: p.status,
         domain: p.domain,
         score: h.score
       })
@@ -151,6 +153,7 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
       const chunk = blob ? chunkText(blob.content)[p.chunk_index] ?? '' : ''
       results.push({
         type: 'raw_chunk',
+        kind: 'raw_evidence', // unverified source material, not maintained knowledge
         source_id: p.source_id,
         chunk_index: p.chunk_index,
         title: p.title,

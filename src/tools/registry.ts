@@ -3,8 +3,12 @@
 // entry here with zero transport changes.
 
 import { ToolDefinition, ok } from '../types'
-import { ingestTool } from './ingest'
+import { instructionsTool } from './instructions'
+import { listPagesTool } from './list-pages'
+import { getPageTool } from './get-page'
 import { queryTool } from './query'
+import { ingestTool } from './ingest'
+import { registerSourceTool } from './register-source'
 import { updateTool } from './update'
 import { lintTool } from './lint'
 
@@ -22,10 +26,15 @@ const pingTool: ToolDefinition = {
     ok({ status: 'alive', server: 'library-mcp', time: new Date().toISOString() })
 }
 
+// Ordered roughly by the librarian workflow: orient → read → retrieve → write → check.
 export const TOOLS: ToolDefinition[] = [
   pingTool,
-  ingestTool,
+  instructionsTool,
+  listPagesTool,
+  getPageTool,
   queryTool,
+  ingestTool,
+  registerSourceTool,
   updateTool,
   lintTool
 ]

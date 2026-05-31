@@ -73,7 +73,9 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   if (typeof a.summary !== 'string' || a.summary.length === 0 || a.summary.length > 200) {
     throw new DomainException('VALIDATION_ERROR', 'summary is required and must be 1–200 characters')
   }
-  const status: string = a.status ?? 'active'
+  // Default to draft: a page is only promoted to active deliberately, once it has
+  // sources and has been reviewed. This keeps unreviewed writes out of default queries.
+  const status: string = a.status ?? 'draft'
   if (!['draft', 'active', 'deprecated'].includes(status)) {
     throw new DomainException('VALIDATION_ERROR', 'status must be draft | active | deprecated')
   }

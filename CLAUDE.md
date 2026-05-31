@@ -59,12 +59,22 @@ If an operation requires interpretation, it belongs in the librarian agent, not 
 
 ## What you are building
 
-Four tools:
+Four core tools:
 
 - **library_ingest** — store a raw source document, chunk and embed it
 - **library_query** — retrieve relevant wiki pages or raw source chunks
 - **library_update** — write or update a curated wiki page
 - **library_lint** — check the wiki for structural health issues
+
+Plus governance / read tools (added in the self-describing patch) and a health check:
+
+- **library_ping** — liveness check
+- **library_instructions** — read-only operating doctrine (authority model, librarian
+  workflow, tool roles, citation convention) so an agent can self-orient
+- **library_list_pages** — list the curated catalogue from manifest.json
+- **library_get_page** — fetch a single curated page by filename
+- **library_register_source** — register a citable source by metadata only (no raw
+  ingest, no vectors), so curated pages can cite a stable source_id
 
 -----
 
@@ -641,7 +651,8 @@ Input:
   confidence: string     — high | medium | low | unverified
   tags: string[]         — max 10
   summary: string        — max 200 characters
-  status?: string        — draft | active | deprecated (default: active)
+  status?: string        — draft | active | deprecated (default: draft)
+                           Promote to active deliberately, once sourced and reviewed.
   review_after?: string  — ISO date
   sources?: string[]     — source_ids; validated against raw_manifest.json
   related?: string[]     — wiki filenames this page links to
@@ -762,6 +773,47 @@ Issue types:
 
 gap_detected is not a lint issue. Gap detection belongs in library_query only.
 
+Each lint issue includes a `suggested_fix` string. Registered (metadata-only) sources
+are exempt from `source_not_indexed` — they are citation anchors with no blob/vectors.
+
+-----
+
+## Governance & read tools (patch)
+
+These were added to make the library self-describing, source-aware, and navigable.
+
+### library_instructions
+Read-only. No input. Returns the operating doctrine: what the library is, the authority
+model, the librarian workflow (8 steps), tool roles, and the citation convention. Call
+first to self-orient.
+
+### library_list_pages
+Read-only. Input: `domain?`, `status?` (draft|active|deprecated), `library_id?`. Returns
+the curated catalogue from manifest.json (filtered), each with title/type/domain/
+confidence/status/summary/tags/sources/related/updated.
+
+### library_get_page
+Read-only. Input: `filename` (required), `library_id?`. Returns the manifest metadata,
+the full markdown (frontmatter + body), and the body alone. NOT_FOUND if absent.
+
+### library_register_source
+Input: `source_id` (required, safe identifier — friendly ids like `claude-build-13`
+allowed), `title` (required), `source_type?`, `domain?`, `source_url?`, `library_id?`.
+Writes a metadata-only entry to raw_manifest.json with `kind: "registered"`,
+`indexed: false`, `chunks_indexed: 0`. No blob, no vectors. Idempotent (upserts by
+source_id); refuses to clobber an existing ingested source. This resolves
+`unknown_source` warnings from library_update without a full ingest.
+
+### Citation convention
+Every active page must have both `sources[]` metadata and at least one inline
+`[source: <source_id>]` marker in the body. Cited source_ids should exist in
+raw_manifest.json (ingest or register them first). Keep the syntax simple at MVP.
+
+### library_query result kinds
+Each result carries a `kind`: `curated` (wiki_page — maintained knowledge) or
+`raw_evidence` (raw_chunk — unverified source material). Query results are an access
+path, not authority.
+
 -----
 
 ## Frontmatter format
@@ -774,7 +826,7 @@ title: [from input]
 type: [from input]
 domain: [from input]
 confidence: [from input]
-status: [from input, default: active]
+status: [from input, default: draft]
 summary: [from input]
 tags: [from input as YAML list]
 sources: [from input as YAML list]
