@@ -1,11 +1,12 @@
 // Tool registry. The transport layer (functions/mcp.ts) routes tools/call through
-// TOOL_MAP and never imports individual tool modules directly.
-//
-// Phase 0 ships a single trivial health tool to prove the JSON-RPC wire end to end.
-// As the real tools land (ingest / query / update / lint), each is appended here as
-// one ToolDefinition with zero transport changes.
+// TOOL_MAP and never imports individual tool modules directly. Adding a tool is one
+// entry here with zero transport changes.
 
 import { ToolDefinition, ok } from '../types'
+import { ingestTool } from './ingest'
+import { queryTool } from './query'
+import { updateTool } from './update'
+import { lintTool } from './lint'
 
 const pingTool: ToolDefinition = {
   name: 'library_ping',
@@ -21,7 +22,13 @@ const pingTool: ToolDefinition = {
     ok({ status: 'alive', server: 'library-mcp', time: new Date().toISOString() })
 }
 
-export const TOOLS: ToolDefinition[] = [pingTool]
+export const TOOLS: ToolDefinition[] = [
+  pingTool,
+  ingestTool,
+  queryTool,
+  updateTool,
+  lintTool
+]
 
 export const TOOL_MAP: Map<string, ToolDefinition> = new Map(
   TOOLS.map((t) => [t.name, t])

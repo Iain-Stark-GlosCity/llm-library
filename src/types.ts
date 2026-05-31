@@ -41,6 +41,19 @@ export interface ToolDefinition {
   handler: (input: unknown) => Promise<DomainEnvelope>
 }
 
+// Thrown by storage / embed / tool code to request a specific domain error code.
+// toEnvelope() converts it into a { ok: false, error } envelope.
+export class DomainException extends Error {
+  constructor(
+    public code: DomainErrorCode,
+    message: string,
+    public details?: unknown
+  ) {
+    super(message)
+    this.name = 'DomainException'
+  }
+}
+
 export function ok<T>(data: T, warnings: string[] = []): DomainSuccess<T> {
   return { ok: true, data, warnings }
 }
@@ -51,4 +64,20 @@ export function fail(
   details?: unknown
 ): DomainFailure {
   return { ok: false, error: { code, message, ...(details !== undefined ? { details } : {}) } }
+}
+
+// Runs a tool implementation, mapping thrown DomainExceptions to domain failures.
+// Any other unexpected throw becomes STORAGE_ERROR so it rides in-envelope rather
+// than surfacing as an opaque JSON-RPC -32603.
+export async function toEnvelope(
+  fn: () => Promise<DomainEnvelope>
+): Promise<DomainEnvelope> {
+  try {
+    return await fn()
+  } catch (err) {
+    if (err instanceof DomainException) {
+      return fail(err.code, err.message, err.details)
+    }
+    return fail('STORAGE_ERROR', (err as Error)?.message ?? 'Unexpected error')
+  }
 }

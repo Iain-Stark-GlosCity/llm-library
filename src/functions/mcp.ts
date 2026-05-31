@@ -168,9 +168,12 @@ export async function mcpHandler(
   }
 }
 
+// authLevel 'anonymous' for MVP — MCP auth is deferred (function keys are a faff to
+// thread through MCP clients today). Put this behind a key / APIM / Easy Auth before
+// loading anything sensitive.
 app.http('mcp', {
   methods: ['POST'],
-  authLevel: 'function',
+  authLevel: 'anonymous',
   route: 'mcp',
   handler: mcpHandler
 })
