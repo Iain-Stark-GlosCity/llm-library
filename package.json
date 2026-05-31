@@ -1,0 +1,27 @@
+{
+  "name": "library-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing an AI-optimised wiki knowledge base over JSON-RPC (Azure Functions v4)",
+  "main": "dist/src/functions/*.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "prestart": "npm run build",
+    "start": "func start"
+  },
+  "dependencies": {
+    "@azure/functions": "^4.5.0",
+    "@azure/storage-blob": "^12.24.0",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/uuid": "^9.0.8",
+    "azure-functions-core-tools": "^4.0.6280",
+    "typescript": "^5.5.0"
+  }
+}
