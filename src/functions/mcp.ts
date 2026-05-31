@@ -57,7 +57,7 @@ function rpcError(id: JsonRpcId, code: number, message: string): HttpResponseIni
 // Accepted notification — no response body is sent (HTTP 202).
 const NO_RESPONSE = Symbol('no-response')
 
-async function handleMethod(req: JsonRpcRequest): Promise<unknown | typeof NO_RESPONSE> {
+async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promise<unknown | typeof NO_RESPONSE> {
   switch (req.method) {
     case 'initialize': {
       const requested = req.params?.protocolVersion
@@ -73,8 +73,9 @@ async function handleMethod(req: JsonRpcRequest): Promise<unknown | typeof NO_RE
     }
 
     case 'notifications/initialized':
-      // Client courtesy notification. Accept and ignore.
-      return NO_RESPONSE
+      // Client courtesy notification. Accept and ignore. If a client incorrectly
+      // attaches an id, still answer so the JSON-RPC request does not hang.
+      return isNotification ? NO_RESPONSE : {}
 
     case 'ping':
       return {}
@@ -89,10 +90,17 @@ async function handleMethod(req: JsonRpcRequest): Promise<unknown | typeof NO_RE
       }
 
     case 'tools/call': {
-      const name = req.params?.name
-      const args = req.params?.arguments ?? {}
+      const params = req.params
+      const name = params?.name
       if (typeof name !== 'string') {
         throw new RpcError(INVALID_PARAMS, 'tools/call requires a string "name"')
+      }
+      if (!params || typeof params !== 'object' || !('arguments' in params)) {
+        throw new RpcError(INVALID_PARAMS, 'tools/call requires an "arguments" object')
+      }
+      const args = params.arguments
+      if (args === null || typeof args !== 'object' || Array.isArray(args)) {
+        throw new RpcError(INVALID_PARAMS, 'tools/call requires an "arguments" object')
       }
       const tool = TOOL_MAP.get(name)
       if (!tool) {
@@ -107,7 +115,7 @@ async function handleMethod(req: JsonRpcRequest): Promise<unknown | typeof NO_RE
 
     default:
       // Unknown notifications must not produce an error response (no id to address).
-      if (req.method.startsWith('notifications/')) return NO_RESPONSE
+      if (isNotification && req.method.startsWith('notifications/')) return NO_RESPONSE
       throw new RpcError(METHOD_NOT_FOUND, `Method not found: ${req.method}`)
   }
 }
@@ -141,16 +149,23 @@ export async function mcpHandler(
     body.jsonrpc !== '2.0' ||
     typeof body.method !== 'string'
   ) {
-    const id = body && typeof body === 'object' ? body.id ?? null : null
+    const candidateId = body && typeof body === 'object' ? body.id ?? null : null
+    const id =
+      candidateId === null || typeof candidateId === 'string' || typeof candidateId === 'number'
+        ? candidateId
+        : null
     return rpcError(id, INVALID_REQUEST, 'Invalid JSON-RPC 2.0 request')
   }
 
   // A message with no "id" is a notification: process it, return 202, no body.
   const isNotification = !('id' in body)
   const id: JsonRpcId = isNotification ? null : body.id
+  if (!isNotification && id !== null && typeof id !== 'string' && typeof id !== 'number') {
+    return rpcError(null, INVALID_REQUEST, 'Invalid JSON-RPC id')
+  }
 
   try {
-    const result = await handleMethod(body as JsonRpcRequest)
+    const result = await handleMethod(body as JsonRpcRequest, isNotification)
     if (isNotification || result === NO_RESPONSE) {
       return { status: 202 }
     }
