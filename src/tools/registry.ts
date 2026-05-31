@@ -1,8 +1,10 @@
-// Tool registry. The transport layer (functions/mcp.ts) routes tools/call through
-// TOOL_MAP and never imports individual tool modules directly. Adding a tool is one
-// entry here with zero transport changes.
+// Tool registry. The transport layer (functions/mcp.ts) routes most tools/call
+// requests through TOOL_MAP. library_ping is intentionally also imported directly
+// by the transport so health checks stay dependency-light. Adding any other tool is
+// one entry here with zero transport changes.
 
-import { ToolDefinition, ok } from '../types'
+import { ToolDefinition } from '../types'
+import { pingTool } from './ping'
 import { instructionsTool } from './instructions'
 import { listPagesTool } from './list-pages'
 import { getPageTool } from './get-page'
@@ -13,20 +15,6 @@ import { registerSourceTool } from './register-source'
 import { updateTool } from './update'
 import { updateSchemaTool } from './update-schema'
 import { lintTool } from './lint'
-
-const pingTool: ToolDefinition = {
-  name: 'library_ping',
-  description:
-    'Health check for the library MCP. Returns server liveness and the current ' +
-    'server time. Takes no meaningful input.',
-  inputSchema: {
-    type: 'object',
-    properties: {},
-    additionalProperties: false
-  },
-  handler: async () =>
-    ok({ status: 'alive', server: 'library-mcp', time: new Date().toISOString() })
-}
 
 // Ordered roughly by the librarian workflow: orient → read → retrieve → write → check.
 export const TOOLS: ToolDefinition[] = [
