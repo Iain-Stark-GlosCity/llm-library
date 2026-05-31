@@ -6,6 +6,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/fu
 import { ToolDefinition } from '../types'
 import { pingTool } from '../tools/ping'
 import { diagnosticsWarnings, getRuntimeDiagnostics } from '../runtime-diagnostics'
+import { getConfig } from '../config'
 
 const SERVER_NAME = 'library-mcp'
 const SERVER_VERSION = '0.1.0'
@@ -63,7 +64,7 @@ function transportHealthResponse(): HttpResponseInit {
   const diagnostics = getRuntimeDiagnostics(SERVER_NAME)
   return jsonResponse({
     ok: true,
-    data: diagnostics,
+    data: { ...diagnostics, mcp_mode: getConfig().mcpMode },
     warnings: diagnosticsWarnings(diagnostics)
   })
 }

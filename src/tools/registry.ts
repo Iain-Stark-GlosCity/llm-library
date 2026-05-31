@@ -15,9 +15,23 @@ import { registerSourceTool } from './register-source'
 import { updateTool } from './update'
 import { updateSchemaTool } from './update-schema'
 import { lintTool } from './lint'
+import { deprecatePageTool } from './deprecate-page'
+import { getConfig } from '../config'
 
 // Ordered roughly by the librarian workflow: orient → read → retrieve → write → check.
-export const TOOLS: ToolDefinition[] = [
+// Read-only mode exposes only safe query/retrieval/inspection tools. Set
+// LIBRARY_MCP_MODE=librarian to expose mutating editor tools.
+export const READ_ONLY_TOOLS: ToolDefinition[] = [
+  pingTool,
+  instructionsTool,
+  getSchemaTool,
+  listPagesTool,
+  getPageTool,
+  queryTool,
+  lintTool
+]
+
+export const LIBRARIAN_TOOLS: ToolDefinition[] = [
   pingTool,
   instructionsTool,
   getSchemaTool,
@@ -28,8 +42,11 @@ export const TOOLS: ToolDefinition[] = [
   registerSourceTool,
   updateTool,
   updateSchemaTool,
+  deprecatePageTool,
   lintTool
 ]
+
+export const TOOLS: ToolDefinition[] = getConfig().mcpMode === 'librarian' ? LIBRARIAN_TOOLS : READ_ONLY_TOOLS
 
 export const TOOL_MAP: Map<string, ToolDefinition> = new Map(
   TOOLS.map((t) => [t.name, t])

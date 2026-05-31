@@ -70,6 +70,7 @@ Set these as **Application settings** on the Function App (and in a local
 | `LIBRARY_SCHEMA_CONTAINER` | | `library-schemas` | Schema blob container |
 | `QDRANT_COLLECTION` | | `library` | |
 | `EMBEDDING_MODEL` | | `text-embedding-3-small` | |
+| `LIBRARY_MCP_MODE` | | `read_only` | Use `read_only` for normal agents. Set `librarian` only for editor workflows that need ingest/update/deprecate/schema writes. |
 
 Plus the runtime settings Azure Functions itself needs:
 `FUNCTIONS_WORKER_RUNTIME=node`, `FUNCTIONS_EXTENSION_VERSION=~4`,
@@ -158,14 +159,40 @@ Once connected, run the full lifecycle to prove the system end to end:
 1. **Ingest** a source — `library_ingest` (e.g. this repo's `CLAUDE.md`,
    `source_type: primary`, `domain: ai-knowledge-layer`).
 2. **Query** it — `library_query` with `scope: raw` to confirm chunks return.
-3. **Create** a curated page — `library_update`.
-4. **Query** the wiki — `library_query` (default `scope: wiki`) returns the page.
-5. **Update** the page — confirm the previous version lands in `history/`, the
+3. Switch to librarian/editor mode (`LIBRARY_MCP_MODE=librarian`) before write tests.
+4. **Create** a curated page — `library_update`.
+5. **Query** the wiki — `library_query` (default `scope: wiki`) returns the page.
+6. **Update** the page — confirm the previous version lands in `history/`, the
    `manifest.json` `updated` timestamp changes, and the Qdrant payload `updated`
    changes.
-6. **Lint** — `library_lint` shows no `stale_embedding` for the updated page.
+7. **Lint** — `library_lint` shows no `stale_embedding` for the updated page.
 
 ---
+
+## Operating modes and cleanup
+
+The server defaults to **read-only agent mode** (`LIBRARY_MCP_MODE=read_only`). In
+that mode `tools/list` exposes only safe inspection and retrieval tools:
+`library_ping`, `library_instructions`, `library_get_schema`, `library_list_pages`,
+`library_get_page`, `library_query`, and `library_lint`.
+
+Set `LIBRARY_MCP_MODE=librarian` only for editor workflows. Librarian mode also
+exposes mutating tools: `library_ingest`, `library_register_source`,
+`library_update`, `library_update_schema`, and `library_deprecate_page`.
+
+For tests, prefer a disposable `library_id`. If a curated test page lands in a
+shared library, retire it with `library_deprecate_page`; deprecated pages are
+excluded from default wiki queries.
+
+`library_query` is domain-scoped by default: pass `domain` with the normal
+`scope: "wiki"` default. Set `allow_cross_domain: true` only when deliberately
+performing cross-domain discovery, and set `scope: "raw"` or `"both"` only when
+raw evidence is needed.
+
+Active pages are promoted fail-fast: source IDs must exist, inline
+`[source: <id>]` markers must reference existing `sources[]` entries, and active
+pages require `reviewed_by` plus `reviewed_at`. High-confidence pages require
+source support. Synthesis pages additionally require `review_after`.
 
 ## Failure semantics
 

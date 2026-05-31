@@ -7,7 +7,7 @@ import { readManifest } from '../storage/manifest'
 import { readRawManifest } from '../storage/raw-manifest'
 import { listSchemaDomains } from '../storage/schema'
 import { scrollPoints } from '../storage/qdrant'
-import { daysSince } from './shared'
+import { daysSince, inlineSourceIds } from './shared'
 
 interface LintIssue {
   type: string
@@ -52,6 +52,7 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
   }
 
   const pages = manifest.pages.filter((p) => !domainFilter || p.domain === domainFilter)
+  const knownSources = new Set(rawManifest.sources.map((s) => s.source_id))
   const allFilenames = new Set(manifest.pages.map((p) => p.filename))
 
   // Inbound related[] links from all active pages (for orphan detection).
@@ -105,17 +106,64 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
   }
 
   for (const p of pages) {
-    if (p.status !== 'active') continue
-    if (!p.sources || p.sources.length === 0) {
+    const pageSources = p.sources || []
+    const unknownSources = pageSources.filter((sourceId) => !knownSources.has(sourceId))
+    for (const sourceId of unknownSources) {
+      issues.push({
+        type: 'unknown_source_metadata',
+        page: p.filename,
+        source_id: sourceId,
+        description: `sources[] references unknown source_id "${sourceId}"`,
+        severity: 'error',
+        suggested_fix: `Register ${sourceId} with library_register_source, ingest it with library_ingest, or remove it from sources[].`
+      })
+    }
+    if (p.status === 'active' && pageSources.length === 0) {
       issues.push({
         type: 'missing_source_metadata',
         page: p.filename,
         description: 'active page has empty or absent sources[]',
-        severity: 'warning',
+        severity: 'error',
         suggested_fix: 'Add at least one source_id to sources[] (register it first with library_register_source if needed).'
       })
     }
-    if ((p.type === 'concept' || p.type === 'synthesis') && !inbound.has(p.filename)) {
+    if (p.confidence === 'high' && pageSources.length === 0) {
+      issues.push({
+        type: 'high_confidence_without_sources',
+        page: p.filename,
+        description: 'high-confidence page has no source support in sources[]',
+        severity: 'error',
+        suggested_fix: 'Add source support or lower confidence.'
+      })
+    }
+    if (p.status === 'active' && (!p.reviewed_by || !p.reviewed_at)) {
+      issues.push({
+        type: 'active_missing_review_metadata',
+        page: p.filename,
+        description: 'active page is missing reviewed_by or reviewed_at metadata',
+        severity: 'error',
+        suggested_fix: 'Re-run library_update with reviewed_by and reviewed_at after review.'
+      })
+    }
+    if (p.reviewed_at && Number.isNaN(Date.parse(p.reviewed_at))) {
+      issues.push({
+        type: 'invalid_reviewed_at',
+        page: p.filename,
+        description: `reviewed_at is not parseable as a date: ${p.reviewed_at}`,
+        severity: 'error',
+        suggested_fix: 'Use an ISO date or timestamp for reviewed_at.'
+      })
+    }
+    if (p.type === 'synthesis' && !p.review_after) {
+      issues.push({
+        type: 'synthesis_missing_review_after',
+        page: p.filename,
+        description: 'synthesis page is missing review_after metadata',
+        severity: 'error',
+        suggested_fix: 'Re-run library_update with review_after set to an ISO date.'
+      })
+    }
+    if ((p.type === 'concept' || p.type === 'synthesis') && p.status === 'active' && !inbound.has(p.filename)) {
       issues.push({
         type: 'orphan_page',
         page: p.filename,
@@ -126,20 +174,68 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
     }
   }
 
-  // Content-fetch checks: inline_citation_missing (active) and open_contradiction.
+  // Content-fetch checks: inline source integrity (active/high confidence) and open_contradiction.
   for (const p of pages) {
-    const needsBody = p.status === 'active' || p.type === 'contradiction'
+    const needsBody = p.status === 'active' || p.confidence === 'high' || p.type === 'contradiction'
     if (!needsBody) continue
     const blob = await readBlob(wiki, `pages/${p.filename}`)
     const body = blob?.content ?? ''
-    if (p.status === 'active' && !/\[source:[^\]]*\]/.test(body)) {
+    const inlineSources = inlineSourceIds(body)
+    const metadataSources = new Set(p.sources || [])
+    if (p.status === 'active' && inlineSources.length === 0) {
       issues.push({
         type: 'inline_citation_missing',
         page: p.filename,
-        description: 'page body contains no [source: ...] citation',
-        severity: 'info',
+        description: 'active page body contains no [source: ...] citation',
+        severity: 'error',
         suggested_fix: 'Add at least one inline [source: <source_id>] marker in the body.'
       })
+    }
+    if (p.confidence === 'high' && inlineSources.length === 0) {
+      issues.push({
+        type: 'high_confidence_without_inline_citation',
+        page: p.filename,
+        description: 'high-confidence page body contains no inline [source: ...] citation',
+        severity: 'error',
+        suggested_fix: 'Add inline citation support or lower confidence.'
+      })
+    }
+    for (const sourceId of inlineSources) {
+      if (!knownSources.has(sourceId)) {
+        issues.push({
+          type: 'unknown_inline_source',
+          page: p.filename,
+          source_id: sourceId,
+          description: `inline citation references unknown source_id "${sourceId}"`,
+          severity: 'error',
+          suggested_fix: `Register ${sourceId} with library_register_source, ingest it with library_ingest, or remove the citation.`
+        })
+      }
+      if (!metadataSources.has(sourceId)) {
+        issues.push({
+          type: 'inline_source_missing_from_metadata',
+          page: p.filename,
+          source_id: sourceId,
+          description: `inline citation "${sourceId}" is not present in sources[]`,
+          severity: 'error',
+          suggested_fix: `Add ${sourceId} to sources[] or remove the inline citation.`
+        })
+      }
+    }
+    if (p.confidence === 'high') {
+      const inlineSet = new Set(inlineSources)
+      for (const sourceId of p.sources || []) {
+        if (!inlineSet.has(sourceId)) {
+          issues.push({
+            type: 'high_confidence_source_not_cited_inline',
+            page: p.filename,
+            source_id: sourceId,
+            description: `high-confidence sources[] entry "${sourceId}" is not cited inline`,
+            severity: 'error',
+            suggested_fix: `Add an inline [source: ${sourceId}] marker near the supported claim, or lower confidence.`
+          })
+        }
+      }
     }
     if (p.type === 'contradiction' && !/resolution:/i.test(body)) {
       issues.push({

@@ -24,6 +24,7 @@ const inputSchema = {
     scope: { type: 'string', enum: ['wiki', 'raw', 'both'] },
     min_confidence: { type: 'string', enum: ['high', 'medium', 'low', 'unverified'] },
     include_deprecated: { type: 'boolean' },
+    allow_cross_domain: { type: 'boolean' },
     library_id: { type: 'string' }
   },
   required: ['question'],
@@ -112,6 +113,10 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   if (topK < 1) topK = 1
   if (topK > 20) topK = 20
   const domain = typeof a.domain === 'string' && a.domain ? a.domain : undefined
+  const allowCrossDomain = a.allow_cross_domain === true
+  if (!domain && !allowCrossDomain) {
+    throw new DomainException('VALIDATION_ERROR', 'domain is required by default; set allow_cross_domain: true for deliberate cross-domain discovery')
+  }
   const scope: 'wiki' | 'raw' | 'both' = ['wiki', 'raw', 'both'].includes(a.scope) ? a.scope : 'wiki'
   const minConfidence = ['high', 'medium', 'low', 'unverified'].includes(a.min_confidence)
     ? a.min_confidence
@@ -120,6 +125,8 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
   const warnings: string[] = []
+  if (allowCrossDomain) warnings.push('cross_domain_query')
+  if (scope !== 'wiki') warnings.push(`non_default_scope:${scope}`)
   const question: string = a.question
 
   await ensureCollection()
