@@ -67,6 +67,7 @@ Set these as **Application settings** on the Function App (and in a local
 | `OPENAI_API_KEY` | ✅ | — | OpenAI API key |
 | `LIBRARY_RAW_CONTAINER` | | `library-raw` | |
 | `LIBRARY_WIKI_CONTAINER` | | `library-wiki` | |
+| `LIBRARY_SCHEMA_CONTAINER` | | `library-schemas` | Schema blob container |
 | `QDRANT_COLLECTION` | | `library` | |
 | `EMBEDDING_MODEL` | | `text-embedding-3-small` | |
 
