@@ -1,8 +1,14 @@
 # AI Library MCP — CLAUDE.md (Build Schema)
 
 You are building an MCP server that exposes an AI-optimised wiki knowledge base.
-This is an Azure Functions Node.js project following the existing MCP server patterns
-in this codebase. Read existing MCPs before writing any code.
+This is an Azure Functions v4 Node.js project (Node 20 LTS, TypeScript).
+
+**Repo state.** There is no prior MCP server in this repo to copy. The repository
+currently holds only this `CLAUDE.md` and `.gitignore` — there is no `src/`, no
+config, and no `func-mcp-poc`. Everything under `src/` and all config files are to be
+created from scratch. The MCP HTTP transport is built per the **MCP transport
+contract** section below. Add `local.settings.json` to `.gitignore` before committing
+secrets.
 
 -----
 
@@ -98,8 +104,10 @@ dense vector (`default`) and a sparse text vector (`text`). Queries generate bot
 vectors and use Qdrant RRF fusion. manifest.json is used for metadata, filtering,
 gap detection, and page lookup — not for manual keyword ranking.
 
-**Framework:** Azure Functions v4 Node.js. MCP protocol over HTTP, same pattern as
-existing func-mcp-poc functions.
+**Framework:** Azure Functions v4 Node.js. MCP protocol over **JSON-RPC 2.0, single
+HTTP POST, `application/json` response (Streamable HTTP — NOT SSE / not
+`text/event-stream`). Stateless: no session, no `Mcp-Session-Id`.** See the
+**MCP transport contract** section for the full wire contract.
 
 -----
 
@@ -386,6 +394,95 @@ Index collisions (two tokens mapping to the same index) are acceptable at MVP sc
 
 At query time, generate the sparse vector from the question text using the same
 tokenise → hash pipeline, then pass both dense and sparse vectors to the query API.
+
+-----
+
+## MCP transport contract
+
+The four tools are exposed over **JSON-RPC 2.0 on a single HTTP POST**. The server
+responds with `application/json`. It does **not** use SSE / `text/event-stream`, and
+it is **stateless** — no session, no `Mcp-Session-Id`. Every request is
+self-contained, which suits the Azure Functions consumption plan (instances are
+ephemeral and may scale to zero).
+
+**Single function.** One HTTP-trigger function `mcp`: `POST /api/mcp`,
+`authLevel: 'function'`. The caller supplies the function key via `?code=...` or the
+`x-functions-key` header. The MCP client stores the keyed URL. OAuth is out of scope
+for MVP.
+
+**Two layers — keep them distinct.** This is the crux of the design:
+
+- **Protocol layer (JSON-RPC 2.0).** `{ "jsonrpc": "2.0", "id", "result" }` or
+  `{ "jsonrpc": "2.0", "id", "error": { "code", "message", "data" } }`. Owned by
+  `functions/mcp.ts`. This is what the MCP client (Claude) speaks.
+- **Domain layer.** The `{ ok, data, warnings }` / `{ ok, error }` envelope from the
+  **MCP response envelope** section. Owned by the four tool handlers. Tools never know
+  they are spoken over JSON-RPC.
+
+The bridge: a `tools/call` is a **successful** JSON-RPC response (HTTP 200, `result`
+populated) even when the domain operation failed (`ok: false`). A domain failure rides
+inside the tool result content; it is not a JSON-RPC error.
+
+**Methods handled (minimal working server):**
+
+| Method | Type | Result |
+|---|---|---|
+| `initialize` | request | `{ protocolVersion, capabilities: { tools: {} }, serverInfo: { name: "library-mcp", version } }` |
+| `notifications/initialized` | notification | no response — HTTP 202, empty body |
+| `tools/list` | request | `{ tools: [ { name, description, inputSchema }, ... ] }` |
+| `tools/call` | request | `{ content: [{ type: "text", text }], isError }` |
+| `ping` | request | `{}` |
+
+Any other method → JSON-RPC error `-32601`. A message with no `id` is a notification:
+process it and return HTTP 202 with no body. JSON array batches are out of scope for
+MVP — reject with `-32600`.
+
+**`initialize`.** Pin a supported `protocolVersion` constant. Echo the client's
+requested version when it is one we support, otherwise return ours. Advertise only
+`capabilities: { tools: {} }` (no resources / prompts / logging at MVP). Persist
+nothing — a client may `initialize` on every cold start without consequence.
+
+**`tools/list`.** Returns the four tools, each `{ name, description, inputSchema }`
+where `inputSchema` is JSON Schema (`type: "object"`) derived from the **Tool
+specifications** below. The schema is a display/validation hint for the client; the
+tool handlers still perform authoritative validation and return `VALIDATION_ERROR`.
+
+**`tools/call` wrapping.** `params` is `{ name, arguments }`. Look up `name` in the
+tool registry; unknown name (or missing `arguments`) → JSON-RPC `-32602`. Otherwise
+call `handler(arguments)`, which returns a domain envelope, and wrap it:
+
+```json
+{
+  "content": [{ "type": "text", "text": "<JSON.stringify(domainEnvelope)>" }],
+  "isError": <domainEnvelope.ok === false>
+}
+```
+
+The domain envelope is stringified JSON inside a single text content item. The client
+parses that string to recover `{ ok, data, warnings }` / `{ ok, error }`.
+
+**JSON-RPC error codes — protocol problems only:**
+
+| Condition | Code |
+|---|---|
+| Body is not valid JSON | `-32700` parse error (`id: null`) |
+| Not a valid JSON-RPC 2.0 request | `-32600` invalid request |
+| Unknown `method` | `-32601` method not found |
+| Unknown tool name / missing `arguments` | `-32602` invalid params |
+| Uncaught exception in a handler | `-32603` internal error |
+
+**Domain error codes do NOT map to JSON-RPC errors.** `VALIDATION_ERROR`,
+`STORAGE_ERROR`, `EMBEDDING_ERROR`, `CONFLICT`, `NOT_FOUND` ride inside
+`result.content[0].text` as `{ ok: false, error: {...} }` with `result.isError: true`.
+A failed domain op is still a successful (HTTP 200) JSON-RPC `tools/call`. This keeps
+the structured domain error readable as tool output rather than an opaque transport
+failure.
+
+**Registry / dispatch.** Each tool is a pure async function
+`(input) => Promise<DomainEnvelope>` plus a static `inputSchema`. `functions/mcp.ts`
+routes `tools/call` through a `TOOL_MAP` (see `tools/registry.ts`). Adding a tool is
+one registry entry with zero transport changes; handlers are unit-testable without any
+HTTP/JSON-RPC scaffolding.
 
 -----
 
@@ -878,6 +975,17 @@ entire file on each library_update call — do not append incrementally.
 
 ## Build order
 
+**Phase 0 — transport vertical slice first.** Before the storage work below, scaffold
+the project (package.json, tsconfig.json, host.json, local.settings.json.example,
+.funcignore) and build `functions/mcp.ts` (the full JSON-RPC dispatcher per the
+**MCP transport contract**), `types.ts`, and `tools/registry.ts` containing only a
+trivial `ping`/health tool. Prove the wire — `initialize`, `tools/list`, `ping`,
+`notifications/initialized` over `application/json`, and a successful MCP client
+connection — before touching storage. This de-risks the one piece the schema never
+specified. The list below (where `functions/mcp.ts` is last) remains the correct
+sequence for the storage and tool layers, which are wired into the already-proven
+dispatcher.
+
 Build in this sequence. Do not jump ahead.
 
 1. storage/blobs.ts — ETag-aware read/write helpers
@@ -905,12 +1013,15 @@ before you load any serious knowledge domain.
 
 ## File structure
 
+Node 20 LTS, TypeScript. Qdrant and OpenAI are called via raw `fetch` (no SDK).
+
 ```
 library-mcp/
   src/
     functions/
-      mcp.ts              — MCP HTTP trigger, tool routing
+      mcp.ts              — MCP HTTP trigger, JSON-RPC dispatcher, tool routing
     tools/
+      registry.ts         — ToolDefinition list + TOOL_MAP (transport ↔ tools)
       ingest.ts
       query.ts
       update.ts
@@ -926,11 +1037,12 @@ library-mcp/
       openai.ts           — OpenAI embedding API call
       chunk.ts            — text chunking
       ids.ts              — UUIDv5 point ID generation
-    types.ts              — shared TypeScript types
+    types.ts              — shared TypeScript types (DomainEnvelope, ToolDefinition)
   host.json
   local.settings.json.example
   package.json
   tsconfig.json
+  .funcignore
   CLAUDE-library.md       — librarian schema (not this file)
 ```
 
@@ -1028,6 +1140,9 @@ All three must pass before building any tool.
 ## Done means
 
 - All four tools callable via MCP protocol with correct response envelope
+- Transport is JSON-RPC 2.0 over HTTP (`application/json`), not SSE; the single `mcp`
+  function handles initialize / notifications/initialized / tools/list / tools/call /
+  ping
 - library_ingest stores, chunks, embeds, updates raw_manifest.json only
 - library_update versions previous page, generates frontmatter from inputs,
   returns ok: true if page written regardless of secondary state failures
@@ -1038,7 +1153,7 @@ All three must pass before building any tool.
 - gap_detected is not in lint
 - Stale embeddings detectable via lint by scrolling Qdrant
 - Qdrant dimension mismatch raises STORAGE_ERROR at collection setup
-- Deployed alongside existing func-mcp-poc functions
+- Deployed as a standalone Azure Functions v4 app
 - Connected as MCP server in Claude settings
 
 ## Proof of life test
