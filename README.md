@@ -23,7 +23,8 @@ See [`CLAUDE.md`](./CLAUDE.md) for the full build schema and design rationale.
 | `library_lint` | Read-only mechanical health checks (orphans, broken refs, missing citations, open contradictions, stale embeddings, unindexed sources, manifest/blob drift). |
 
 A no-dependency `library_ping` health tool is also exposed — call it first to
-confirm the transport before touching storage.
+confirm the transport before touching storage. It returns safe runtime diagnostics
+that identify missing Function App settings without exposing secret values.
 
 ---
 
@@ -35,10 +36,11 @@ confirm the transport before touching storage.
   vector (`default`, 1536-dim Cosine) and a sparse vector (`text`, IDF). Queries
   fuse both with native RRF. Called over the HTTP API — no SDK.
 - **Embedding:** OpenAI `text-embedding-3-small` (1536 dims), via raw `fetch`.
-- **Transport:** one HTTP-trigger function `mcp` at `POST /api/mcp`. Stateless
-  (no session, no `Mcp-Session-Id`). Two layers kept distinct: the JSON-RPC
-  protocol envelope (owned by `functions/mcp.ts`) and the domain
-  `{ ok, data, warnings }` envelope (owned by the tool handlers).
+- **Transport:** one HTTP-trigger function `mcp` at `POST /api/mcp` for MCP
+  JSON-RPC calls, plus a lightweight `GET /api/mcp` health response for
+  deployment diagnostics. Stateless (no session, no `Mcp-Session-Id`). Two layers
+  kept distinct: the JSON-RPC protocol envelope (owned by `functions/mcp.ts`) and
+  the domain `{ ok, data, warnings }` envelope (owned by the tool handlers).
 
 ```
 src/
@@ -98,6 +100,7 @@ Smoke-test the wire with raw JSON-RPC (no auth at MVP):
 
 ```bash
 URL="http://localhost:7071/api/mcp"
+curl -s "$URL"   # lightweight deployment health + safe config diagnostics
 curl -s -X POST "$URL" -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}'
 curl -s -X POST "$URL" -H 'Content-Type: application/json' \

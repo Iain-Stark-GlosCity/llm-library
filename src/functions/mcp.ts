@@ -5,6 +5,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { ToolDefinition } from '../types'
 import { pingTool } from '../tools/ping'
+import { diagnosticsWarnings, getRuntimeDiagnostics } from '../runtime-diagnostics'
 
 const SERVER_NAME = 'library-mcp'
 const SERVER_VERSION = '0.1.0'
@@ -42,7 +43,10 @@ class RpcError extends Error {
 function jsonResponse(body: unknown, status = 200): HttpResponseInit {
   return {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    },
     jsonBody: body
   }
 }
@@ -53,6 +57,19 @@ function rpcResult(id: JsonRpcId, result: unknown): HttpResponseInit {
 
 function rpcError(id: JsonRpcId, code: number, message: string): HttpResponseInit {
   return jsonResponse({ jsonrpc: '2.0', id, error: { code, message } })
+}
+
+function transportHealthResponse(): HttpResponseInit {
+  const diagnostics = getRuntimeDiagnostics(SERVER_NAME)
+  return jsonResponse({
+    ok: true,
+    data: diagnostics,
+    warnings: diagnosticsWarnings(diagnostics)
+  })
+}
+
+function emptyResponse(status: number): HttpResponseInit {
+  return { status, headers: { 'Cache-Control': 'no-store' } }
 }
 
 // Accepted notification — no response body is sent (HTTP 202).
@@ -136,6 +153,19 @@ export async function mcpHandler(
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
+  if (request.method === 'GET') {
+    return transportHealthResponse()
+  }
+  if (request.method === 'HEAD') {
+    return emptyResponse(200)
+  }
+  if (request.method === 'OPTIONS') {
+    return emptyResponse(204)
+  }
+  if (request.method !== 'POST') {
+    return jsonResponse({ error: 'Method not allowed' }, 405)
+  }
+
   let raw: string
   try {
     raw = await request.text()
@@ -199,7 +229,7 @@ export async function mcpHandler(
 // thread through MCP clients today). Put this behind a key / APIM / Easy Auth before
 // loading anything sensitive.
 app.http('mcp', {
-  methods: ['POST'],
+  methods: ['GET', 'HEAD', 'OPTIONS', 'POST'],
   authLevel: 'anonymous',
   route: 'mcp',
   handler: mcpHandler
