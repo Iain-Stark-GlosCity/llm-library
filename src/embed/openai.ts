@@ -34,7 +34,20 @@ export async function embed(input: string | string[]): Promise<number[][]> {
   }
 
   const data = (await resp.json()) as { data: { index: number; embedding: number[] }[] }
+  const expectedCount = Array.isArray(input) ? input.length : 1
+  if (!Array.isArray(data.data) || data.data.length !== expectedCount) {
+    throw new DomainException(
+      'EMBEDDING_ERROR',
+      `Expected ${expectedCount} embedding result(s), got ${Array.isArray(data.data) ? data.data.length : typeof data.data}`
+    )
+  }
+
   const sorted = [...data.data].sort((a, b) => a.index - b.index)
+  for (let i = 0; i < sorted.length; i++) {
+    if (sorted[i].index !== i) {
+      throw new DomainException('EMBEDDING_ERROR', `OpenAI embedding response missing index ${i}`)
+    }
+  }
   const vectors = sorted.map((d) => d.embedding)
 
   for (const v of vectors) {

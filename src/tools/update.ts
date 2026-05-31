@@ -127,23 +127,14 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const existing = await readBlob(wiki, pagePath)
   let created = nowIso
   let previousVersionPath: string | undefined
-
-  // 4. History copy before overwrite.
   if (existing) {
     const ec = extractCreated(existing.content)
     if (ec) created = ec
-    const slug = filename.replace(/\.md$/, '')
-    const safeTs = nowIso.replace(/:/g, '-')
-    const histPath = `history/${slug}/${safeTs}.md`
-    try {
-      await writeBlob(wiki, histPath, existing.content)
-      previousVersionPath = histPath
-    } catch {
-      warnings.push('history_write_failed')
-    }
   }
 
-  // 5–6. Compose full page and write with ETag conditional. This is the critical write.
+  // 4–6. Compose full page and write with ETag conditional. This is the critical write.
+  // History is written after the conditional page write succeeds; otherwise an ETag
+  // conflict would leave a misleading archived version for an update that did not land.
   const frontmatter = renderFrontmatter({
     title,
     type: pageType,
@@ -163,6 +154,18 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const w = await conditionalWrite(wiki, pagePath, fullPage, existing?.etag ?? null, 'text/markdown; charset=utf-8')
   if (w.conflict) throw new DomainException('CONFLICT', `ETag conflict writing ${filename}; caller should retry`)
   if (!w.success) throw new DomainException('STORAGE_ERROR', `Failed to write ${filename}`)
+
+  if (existing) {
+    const slug = filename.replace(/\.md$/, '')
+    const safeTs = nowIso.replace(/:/g, '-')
+    const histPath = `history/${slug}/${safeTs}.md`
+    try {
+      await writeBlob(wiki, histPath, existing.content)
+      previousVersionPath = histPath
+    } catch {
+      warnings.push('history_write_failed')
+    }
+  }
 
   // 7. Embed + upsert wiki_page vector. Failure = warning only.
   let embedded = false

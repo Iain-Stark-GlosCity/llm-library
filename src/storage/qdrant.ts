@@ -99,19 +99,33 @@ export async function hybridQuery(opts: {
 }): Promise<QdrantHit[]> {
   const { url, collection, apiKey } = conn()
   const prefetchLimit = opts.prefetchLimit ?? Math.max(opts.limit, 20)
+  const densePrefetch: Record<string, unknown> = {
+    query: opts.dense,
+    using: 'default',
+    limit: prefetchLimit
+  }
+  if (opts.filter) densePrefetch.filter = opts.filter
+
   const body: any = {
-    prefetch: [
-      { query: opts.dense, using: 'default', limit: prefetchLimit },
-      {
-        query: { indices: opts.sparse.indices, values: opts.sparse.values },
-        using: 'text',
-        limit: prefetchLimit
-      }
-    ],
-    query: { rrf: {} },
+    query: opts.dense,
+    using: 'default',
     limit: opts.limit,
     with_payload: true
   }
+
+  if (opts.sparse.indices.length > 0) {
+    const sparsePrefetch: Record<string, unknown> = {
+      query: { indices: opts.sparse.indices, values: opts.sparse.values },
+      using: 'text',
+      limit: prefetchLimit
+    }
+    if (opts.filter) sparsePrefetch.filter = opts.filter
+
+    body.prefetch = [densePrefetch, sparsePrefetch]
+    body.query = { rrf: {} }
+    delete body.using
+  }
+
   if (opts.filter) body.filter = opts.filter
 
   const resp = await fetch(`${url}/collections/${collection}/points/query`, {
