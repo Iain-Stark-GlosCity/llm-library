@@ -63,12 +63,15 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   if (!['high', 'medium', 'low', 'unverified'].includes(a.confidence)) {
     throw new DomainException('VALIDATION_ERROR', 'confidence must be high | medium | low | unverified')
   }
-  const tags: string[] = Array.isArray(a.tags) ? a.tags.map(String) : []
+  if (!Array.isArray(a.tags) || !a.tags.every((t: unknown) => typeof t === 'string')) {
+    throw new DomainException('VALIDATION_ERROR', 'tags is required and must be an array of strings')
+  }
+  const tags: string[] = a.tags
   if (tags.length > 10) {
     throw new DomainException('VALIDATION_ERROR', 'a maximum of 10 tags is allowed')
   }
-  if (typeof a.summary !== 'string' || a.summary.length > 200) {
-    throw new DomainException('VALIDATION_ERROR', 'summary is required and must be ≤200 characters')
+  if (typeof a.summary !== 'string' || a.summary.length === 0 || a.summary.length > 200) {
+    throw new DomainException('VALIDATION_ERROR', 'summary is required and must be 1–200 characters')
   }
   const status: string = a.status ?? 'active'
   if (!['draft', 'active', 'deprecated'].includes(status)) {
@@ -83,8 +86,14 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const confidence: string = a.confidence
   const summary: string = a.summary
   const reviewAfter: string | undefined = typeof a.review_after === 'string' ? a.review_after : undefined
-  const sources: string[] = Array.isArray(a.sources) ? a.sources.map(String) : []
-  const related: string[] = Array.isArray(a.related) ? a.related.map(String) : []
+  if (a.sources !== undefined && (!Array.isArray(a.sources) || !a.sources.every((s: unknown) => typeof s === 'string'))) {
+    throw new DomainException('VALIDATION_ERROR', 'sources must be an array of strings')
+  }
+  if (a.related !== undefined && (!Array.isArray(a.related) || !a.related.every((r: unknown) => typeof r === 'string'))) {
+    throw new DomainException('VALIDATION_ERROR', 'related must be an array of strings')
+  }
+  const sources: string[] = a.sources ?? []
+  const related: string[] = a.related ?? []
   const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
   const warnings: string[] = []
