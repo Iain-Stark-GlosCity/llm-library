@@ -11,7 +11,7 @@ on:
 
 env:
   AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
-  NODE_VERSION: '22.x' # set this to the node version to use (supports 8.x, 10.x, 12.x)
+  NODE_VERSION: '20.x' # match the Function App runtime (Node 20 LTS)
 
 jobs:
   build:
@@ -35,13 +35,23 @@ jobs:
           npm install
           npm run build --if-present
           npm run test --if-present
+          npm prune --production
           popd
 
+      # Ship only the runtime artifact: compiled output, production node_modules,
+      # and the manifests the host needs. Excludes .git, src/, tests, and dev
+      # dependencies (typescript, azure-functions-core-tools) that bloat the zip.
       - name: Upload artifact for deployment job
         uses: actions/upload-artifact@v4
         with:
           name: node-app
-          path: .
+          path: |
+            dist
+            node_modules
+            host.json
+            package.json
+            package-lock.json
+            .funcignore
 
   deploy:
     runs-on: windows-latest
