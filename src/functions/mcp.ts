@@ -3,7 +3,9 @@
 // See CLAUDE.md "MCP transport contract" for the full contract.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
-import { TOOLS, TOOL_MAP } from '../tools/registry'
+import { ToolDefinition } from '../types'
+import { pingTool } from '../tools/ping'
+import { diagnosticsWarnings, getRuntimeDiagnostics } from '../runtime-diagnostics'
 
 const SERVER_NAME = 'library-mcp'
 const SERVER_VERSION = '0.1.0'
@@ -41,7 +43,10 @@ class RpcError extends Error {
 function jsonResponse(body: unknown, status = 200): HttpResponseInit {
   return {
     status,
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Cache-Control': 'no-store'
+    },
     jsonBody: body
   }
 }
@@ -54,8 +59,32 @@ function rpcError(id: JsonRpcId, code: number, message: string): HttpResponseIni
   return jsonResponse({ jsonrpc: '2.0', id, error: { code, message } })
 }
 
+function transportHealthResponse(): HttpResponseInit {
+  const diagnostics = getRuntimeDiagnostics(SERVER_NAME)
+  return jsonResponse({
+    ok: true,
+    data: diagnostics,
+    warnings: diagnosticsWarnings(diagnostics)
+  })
+}
+
+function emptyResponse(status: number): HttpResponseInit {
+  return { status, headers: { 'Cache-Control': 'no-store' } }
+}
+
 // Accepted notification — no response body is sent (HTTP 202).
 const NO_RESPONSE = Symbol('no-response')
+
+async function getRegisteredTools(): Promise<ToolDefinition[]> {
+  const { TOOLS } = await import('../tools/registry')
+  return TOOLS
+}
+
+async function getRegisteredTool(name: string): Promise<ToolDefinition | undefined> {
+  if (name === pingTool.name) return pingTool
+  const { TOOL_MAP } = await import('../tools/registry')
+  return TOOL_MAP.get(name)
+}
 
 async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promise<unknown | typeof NO_RESPONSE> {
   switch (req.method) {
@@ -82,7 +111,7 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
 
     case 'tools/list':
       return {
-        tools: TOOLS.map(({ name, description, inputSchema }) => ({
+        tools: (await getRegisteredTools()).map(({ name, description, inputSchema }) => ({
           name,
           description,
           inputSchema
@@ -102,7 +131,7 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
       if (args === null || typeof args !== 'object' || Array.isArray(args)) {
         throw new RpcError(INVALID_PARAMS, 'tools/call "arguments" must be an object when provided')
       }
-      const tool = TOOL_MAP.get(name)
+      const tool = await getRegisteredTool(name)
       if (!tool) {
         throw new RpcError(INVALID_PARAMS, `Unknown tool: ${name}`)
       }
@@ -124,6 +153,19 @@ export async function mcpHandler(
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
+  if (request.method === 'GET') {
+    return transportHealthResponse()
+  }
+  if (request.method === 'HEAD') {
+    return emptyResponse(200)
+  }
+  if (request.method === 'OPTIONS') {
+    return emptyResponse(204)
+  }
+  if (request.method !== 'POST') {
+    return jsonResponse({ error: 'Method not allowed' }, 405)
+  }
+
   let raw: string
   try {
     raw = await request.text()
@@ -187,7 +229,7 @@ export async function mcpHandler(
 // thread through MCP clients today). Put this behind a key / APIM / Easy Auth before
 // loading anything sensitive.
 app.http('mcp', {
-  methods: ['POST'],
+  methods: ['GET', 'HEAD', 'OPTIONS', 'POST'],
   authLevel: 'anonymous',
   route: 'mcp',
   handler: mcpHandler

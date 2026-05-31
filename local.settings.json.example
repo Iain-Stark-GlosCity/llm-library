@@ -3,6 +3,8 @@
   "Values": {
     "AzureWebJobsStorage": "UseDevelopmentStorage=true",
     "FUNCTIONS_WORKER_RUNTIME": "node",
+    "FUNCTIONS_EXTENSION_VERSION": "~4",
+    "WEBSITE_NODE_DEFAULT_VERSION": "~20",
 
     "LIBRARY_STORAGE_CONNECTION_STRING": "",
     "LIBRARY_RAW_CONTAINER": "library-raw",
