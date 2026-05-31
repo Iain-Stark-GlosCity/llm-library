@@ -26,12 +26,12 @@ const REQUIRED_SETTINGS = [
   'OPENAI_API_KEY'
 ]
 
-const OPTIONAL_SETTINGS = [
-  'LIBRARY_RAW_CONTAINER',
-  'LIBRARY_WIKI_CONTAINER',
-  'LIBRARY_SCHEMA_CONTAINER',
-  'QDRANT_COLLECTION',
-  'EMBEDDING_MODEL'
+const OPTIONAL_SETTINGS: { name: string; defaultValue?: string }[] = [
+  { name: 'LIBRARY_RAW_CONTAINER', defaultValue: 'library-raw' },
+  { name: 'LIBRARY_WIKI_CONTAINER', defaultValue: 'library-wiki' },
+  { name: 'LIBRARY_SCHEMA_CONTAINER', defaultValue: 'library-schemas' },
+  { name: 'QDRANT_COLLECTION', defaultValue: 'library' },
+  { name: 'EMBEDDING_MODEL', defaultValue: 'text-embedding-3-small' }
 ]
 
 function isConfigured(name: string): boolean {
@@ -41,7 +41,9 @@ function isConfigured(name: string): boolean {
 export function getRuntimeDiagnostics(server: string): RuntimeDiagnostics {
   const missing = REQUIRED_SETTINGS.filter((name) => !isConfigured(name))
   const present = REQUIRED_SETTINGS.filter((name) => isConfigured(name))
-  const optionalMissing = OPTIONAL_SETTINGS.filter((name) => !isConfigured(name))
+  const optionalMissing = OPTIONAL_SETTINGS
+    .filter(({ name, defaultValue }) => !isConfigured(name) && !defaultValue)
+    .map(({ name }) => name)
 
   return {
     status: 'alive',
