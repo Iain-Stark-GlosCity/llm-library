@@ -5,6 +5,7 @@ export interface Config {
   storageConnectionString: string
   rawContainer: string
   wikiContainer: string
+  schemaContainer: string
   qdrantUrl: string
   qdrantApiKey: string | undefined
   qdrantCollection: string
@@ -17,6 +18,7 @@ export function getConfig(): Config {
     storageConnectionString: process.env.LIBRARY_STORAGE_CONNECTION_STRING || '',
     rawContainer: process.env.LIBRARY_RAW_CONTAINER || 'library-raw',
     wikiContainer: process.env.LIBRARY_WIKI_CONTAINER || 'library-wiki',
+    schemaContainer: process.env.LIBRARY_SCHEMA_CONTAINER || 'library-schemas',
     qdrantUrl: (process.env.QDRANT_URL || '').replace(/\/+$/, ''),
     qdrantApiKey: process.env.QDRANT_API_KEY || undefined,
     qdrantCollection: process.env.QDRANT_COLLECTION || 'library',

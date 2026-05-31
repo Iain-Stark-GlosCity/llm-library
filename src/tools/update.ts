@@ -98,6 +98,21 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const related: string[] = a.related ?? []
   const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
+  // Synthesis pages represent the current best understanding of a domain. They carry
+  // stricter conventions than concept pages: always active, always sourced, always
+  // reviewable. See the synthesis design.
+  if (pageType === 'synthesis') {
+    if (status !== 'active') {
+      throw new DomainException('VALIDATION_ERROR', 'synthesis pages must have status: active (never draft)')
+    }
+    if (sources.length === 0) {
+      throw new DomainException('VALIDATION_ERROR', 'synthesis pages must include at least one source_id')
+    }
+    if (!reviewAfter) {
+      throw new DomainException('VALIDATION_ERROR', 'synthesis pages require review_after (ISO date)')
+    }
+  }
+
   const warnings: string[] = []
   const nowIso = new Date().toISOString()
 
@@ -194,6 +209,7 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
       tags,
       sources,
       related,
+      review_after: reviewAfter,
       created,
       updated: nowIso,
       embedding_status: embeddingStatus

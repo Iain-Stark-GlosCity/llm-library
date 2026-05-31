@@ -6,10 +6,12 @@ import { ToolDefinition, ok } from '../types'
 import { instructionsTool } from './instructions'
 import { listPagesTool } from './list-pages'
 import { getPageTool } from './get-page'
+import { getSchemaTool } from './get-schema'
 import { queryTool } from './query'
 import { ingestTool } from './ingest'
 import { registerSourceTool } from './register-source'
 import { updateTool } from './update'
+import { updateSchemaTool } from './update-schema'
 import { lintTool } from './lint'
 
 const pingTool: ToolDefinition = {
@@ -30,12 +32,14 @@ const pingTool: ToolDefinition = {
 export const TOOLS: ToolDefinition[] = [
   pingTool,
   instructionsTool,
+  getSchemaTool,
   listPagesTool,
   getPageTool,
   queryTool,
   ingestTool,
   registerSourceTool,
   updateTool,
+  updateSchemaTool,
   lintTool
 ]
 

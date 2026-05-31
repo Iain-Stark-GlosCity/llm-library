@@ -15,6 +15,7 @@ export interface PageEntry {
   tags: string[]
   sources: string[]
   related: string[]
+  review_after?: string
   created: string
   updated: string
   embedding_status: 'ok' | 'failed' | 'pending'

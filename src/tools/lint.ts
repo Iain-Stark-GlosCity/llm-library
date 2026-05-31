@@ -5,6 +5,7 @@ import { DomainEnvelope, ToolDefinition, ok, toEnvelope } from '../types'
 import { getWikiContainer, readBlob, listBlobs } from '../storage/blobs'
 import { readManifest } from '../storage/manifest'
 import { readRawManifest } from '../storage/raw-manifest'
+import { listSchemaDomains } from '../storage/schema'
 import { scrollPoints } from '../storage/qdrant'
 import { daysSince } from './shared'
 
@@ -12,6 +13,7 @@ interface LintIssue {
   type: string
   page?: string
   source_id?: string
+  domain?: string
   description: string
   severity: 'error' | 'warning' | 'info'
   suggested_fix?: string
@@ -162,6 +164,56 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
         description: `source not indexed (embedding_status ${s.embedding_status}, chunks_indexed ${s.chunks_indexed})`,
         severity: 'error',
         suggested_fix: 'Re-ingest the source via library_ingest, or remove the stale raw_manifest entry.'
+      })
+    }
+  }
+
+  // Per-domain checks: synthesis coverage/freshness and schema presence. Computed over
+  // active pages grouped by domain (respecting the optional domainFilter).
+  const schemaDomains = await listSchemaDomains()
+  const activeByDomain = new Map<string, typeof manifest.pages>()
+  for (const p of pages) {
+    if (p.status !== 'active') continue
+    if (!activeByDomain.has(p.domain)) activeByDomain.set(p.domain, [])
+    activeByDomain.get(p.domain)!.push(p)
+  }
+
+  for (const [domain, domainPages] of activeByDomain) {
+    const synthesis = domainPages.filter((p) => p.type === 'synthesis')
+
+    // missing_synthesis — 3+ active pages in a domain but no synthesis page.
+    if (domainPages.length >= 3 && synthesis.length === 0) {
+      issues.push({
+        type: 'missing_synthesis',
+        domain,
+        description: `domain "${domain}" has ${domainPages.length} active pages and no synthesis page`,
+        severity: 'warning',
+        suggested_fix: `Create ${domain}-synthesis.md via library_update with page_type: synthesis.`
+      })
+    }
+
+    // stale_synthesis — synthesis page whose review_after date has passed.
+    for (const s of synthesis) {
+      if (s.review_after && daysSince(s.review_after) > 0) {
+        issues.push({
+          type: 'stale_synthesis',
+          page: s.filename,
+          domain,
+          description: `synthesis review_after ${s.review_after} has passed`,
+          severity: 'info',
+          suggested_fix: 'Re-read the domain pages and update the synthesis, then set a new review_after.'
+        })
+      }
+    }
+
+    // missing_schema — 5+ active pages in a domain but no schema file.
+    if (domainPages.length >= 5 && !schemaDomains.has(domain)) {
+      issues.push({
+        type: 'missing_schema',
+        domain,
+        description: `domain "${domain}" has ${domainPages.length} active pages and no schema file`,
+        severity: 'info',
+        suggested_fix: `Create ${domain}.schema.json via library_update_schema.`
       })
     }
   }

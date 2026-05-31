@@ -7,6 +7,7 @@
     "LIBRARY_STORAGE_CONNECTION_STRING": "",
     "LIBRARY_RAW_CONTAINER": "library-raw",
     "LIBRARY_WIKI_CONTAINER": "library-wiki",
+    "LIBRARY_SCHEMA_CONTAINER": "library-schemas",
 
     "QDRANT_URL": "",
     "QDRANT_API_KEY": "",

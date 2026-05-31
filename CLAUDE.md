@@ -76,6 +76,11 @@ Plus governance / read tools (added in the self-describing patch) and a health c
 - **library_register_source** — register a citable source by metadata only (no raw
   ingest, no vectors), so curated pages can cite a stable source_id
 
+Plus synthesis / per-domain schema tools (added in the synthesis patch):
+
+- **library_get_schema** — read the per-domain schema layered on the global doctrine
+- **library_update_schema** — create or overwrite a `{domain}.schema.json` file
+
 -----
 
 ## Architecture
@@ -127,6 +132,7 @@ HTTP POST, `application/json` response (Streamable HTTP — NOT SSE / not
 LIBRARY_STORAGE_CONNECTION_STRING
 LIBRARY_RAW_CONTAINER              default: library-raw
 LIBRARY_WIKI_CONTAINER             default: library-wiki
+LIBRARY_SCHEMA_CONTAINER           default: library-schemas
 QDRANT_URL                         — stark-library cluster endpoint URL
 QDRANT_API_KEY                     — stark-library cluster API key
 QDRANT_COLLECTION                  — collection name, default: library
@@ -813,6 +819,42 @@ raw_manifest.json (ingest or register them first). Keep the syntax simple at MVP
 Each result carries a `kind`: `curated` (wiki_page — maintained knowledge) or
 `raw_evidence` (raw_chunk — unverified source material). Query results are an access
 path, not authority.
+
+-----
+
+## Synthesis pages & per-domain schema (patch)
+
+Two structural additions that extend the library without breaking existing pages.
+
+### Synthesis pages
+`synthesis` is a `page_type` (already valid). A synthesis page represents the current
+best understanding of a whole domain — what we know taken together, key relationships,
+open questions, unresolved contradictions — not a summary of concept pages. Convention:
+`{domain}-synthesis.md`. library_update enforces synthesis-specific rules: `status` must
+be `active` (never draft), at least one `source`, and `review_after` is required.
+`related[]` should link the domain's active concept pages.
+
+### Per-domain schema
+Optional `{domain}.schema.json` files in the `library-schemas` container (env
+`LIBRARY_SCHEMA_CONTAINER`, default `library-schemas`). A schema **extends** the global
+doctrine — it does not replace it. Domains without a schema inherit the doctrine from
+library_instructions. All fields optional except `domain`: `display_name`, `description`,
+`valid_source_types`, `source_examples`, `required_page_fields`, `page_type_allowlist`,
+`review_after_max_days`, `maintenance_notes`, `audience`.
+
+- **library_get_schema** — input `domain`. Returns the schema, or `schema_found: false`
+  (inherit global doctrine). Read-only.
+- **library_update_schema** — input `domain`, `schema` (object). Writes
+  `{domain}.schema.json`. Overwrites; no versioning in v1.
+
+The librarian workflow gains a step 0: call library_get_schema before ingesting/updating
+in a domain, and update the synthesis page after concept updates when the domain has 3+
+active pages or the synthesis is stale.
+
+### New lint checks
+- `missing_synthesis` (warning) — a domain with 3+ active pages and no synthesis page.
+- `stale_synthesis` (info) — a synthesis page whose `review_after` date has passed.
+- `missing_schema` (info) — a domain with 5+ active pages and no schema file.
 
 -----
 

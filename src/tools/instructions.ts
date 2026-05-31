@@ -22,11 +22,12 @@ const DOCTRINE = {
   ],
 
   librarian_workflow: [
+    '0. Get the domain schema (library_get_schema) to learn domain-specific rules; inherit the global doctrine if none.',
     '1. Ingest the raw source (library_ingest) or register it (library_register_source).',
     '2. Query raw evidence and existing curated pages (library_query).',
     '3. Decide whether the source adds, changes, or contradicts current knowledge.',
-    '4. Synthesise into a curated page (library_update).',
-    '5. Add sources[] and related[] links so the page is sourced and navigable.',
+    '4. Update the concept page(s) (library_update) with sources[] and related[] links.',
+    '5. Update or create the domain synthesis page if the domain now has 3+ active pages or the synthesis is stale.',
     '6. Run library_lint.',
     '7. Repair metadata, links, and citations flagged by lint.',
     '8. Re-query to confirm the knowledge can be found.'
@@ -35,13 +36,21 @@ const DOCTRINE = {
   tool_roles: {
     library_ping: 'Liveness check.',
     library_instructions: 'This operating doctrine.',
+    library_get_schema: 'Read the per-domain schema layered on top of this doctrine.',
     library_list_pages: 'List the curated catalogue (from manifest.json).',
     library_get_page: 'Fetch a single curated page by filename.',
     library_query: 'Hybrid retrieval over curated pages (default) and/or raw chunks.',
     library_ingest: 'Store raw source material: chunk, embed, index.',
     library_register_source: 'Register a citable source by metadata, without a full ingest.',
     library_update: 'Create or update a curated wiki page (the only curated write path).',
+    library_update_schema: 'Create or overwrite a per-domain schema file.',
     library_lint: 'Mechanical health checks over the wiki.'
+  },
+
+  synthesis_pages: {
+    what: 'A synthesis page represents the current best understanding of a whole domain — what we know taken together, key relationships, open questions, and unresolved contradictions. It is not a summary of concept pages.',
+    convention: '{domain}-synthesis.md, page_type: synthesis.',
+    rules: 'Always status: active (never draft), at least one source, and review_after is required (they go stale faster than concept pages). related[] should link the domain’s active concept pages.'
   },
 
   citation_convention: {

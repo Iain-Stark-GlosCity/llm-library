@@ -7,6 +7,7 @@ import { DomainException } from '../types'
 
 let rawInit: Promise<ContainerClient> | null = null
 let wikiInit: Promise<ContainerClient> | null = null
+let schemaInit: Promise<ContainerClient> | null = null
 
 function serviceClient(): BlobServiceClient {
   const cfg = getConfig()
@@ -40,6 +41,16 @@ export function getWikiContainer(): Promise<ContainerClient> {
     })
   }
   return wikiInit
+}
+
+export function getSchemaContainer(): Promise<ContainerClient> {
+  if (!schemaInit) {
+    schemaInit = initContainer(getConfig().schemaContainer).catch((err) => {
+      schemaInit = null
+      throw err
+    })
+  }
+  return schemaInit
 }
 
 export interface BlobReadResult {
