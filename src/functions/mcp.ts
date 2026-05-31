@@ -95,12 +95,12 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
       if (typeof name !== 'string') {
         throw new RpcError(INVALID_PARAMS, 'tools/call requires a string "name"')
       }
-      if (!params || typeof params !== 'object' || !('arguments' in params)) {
-        throw new RpcError(INVALID_PARAMS, 'tools/call requires an "arguments" object')
+      if (!params || typeof params !== 'object' || Array.isArray(params)) {
+        throw new RpcError(INVALID_PARAMS, 'tools/call requires params with a string "name"')
       }
-      const args = params.arguments
+      const args = 'arguments' in params ? params.arguments : {}
       if (args === null || typeof args !== 'object' || Array.isArray(args)) {
-        throw new RpcError(INVALID_PARAMS, 'tools/call requires an "arguments" object')
+        throw new RpcError(INVALID_PARAMS, 'tools/call "arguments" must be an object when provided')
       }
       const tool = TOOL_MAP.get(name)
       if (!tool) {
