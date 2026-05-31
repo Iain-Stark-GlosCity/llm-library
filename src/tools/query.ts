@@ -48,11 +48,43 @@ function buildFilter(opts: {
   return filter
 }
 
+function gapTokens(text: string): string[] {
+  const tokens: string[] = []
+  const normalized = text.toLowerCase()
+
+  // Treat hyphenated identifiers as one informational gap candidate instead of
+  // reporting each component as an independent missing concept. This keeps
+  // canary-style ids such as `find-canary-alpha-20260531` intact while still
+  // tokenizing ordinary prose mechanically.
+  for (const match of normalized.matchAll(/[a-z0-9]+(?:-[a-z0-9]+)*|[a-z0-9]+/g)) {
+    const token = match[0]
+    if (token.length >= 4 && !STOPWORDS.has(token)) tokens.push(token)
+  }
+
+  return tokens
+}
+
+function knownGapTokens(text: string): string[] {
+  const tokens = gapTokens(text)
+  const expanded = new Set(tokens)
+
+  // Catalogue fields may spell an identifier with spaces or punctuation while a
+  // query uses hyphens (or vice versa). Add a compact hyphenated form for each
+  // field so the mechanical check is less brittle for safe identifiers.
+  const parts = (text || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((part) => part.length > 0 && !STOPWORDS.has(part))
+  if (parts.length > 1) expanded.add(parts.join('-'))
+
+  return [...expanded]
+}
+
 async function detectGaps(question: string, libraryId: string): Promise<string[]> {
   const { manifest } = await readManifest(libraryId)
   const known = new Set<string>()
   const add = (s: string) => {
-    for (const w of (s || '').toLowerCase().split(/[^a-z0-9]+/)) if (w) known.add(w)
+    for (const w of knownGapTokens(s || '')) known.add(w)
   }
   for (const p of manifest.pages) {
     add(p.title)
@@ -61,8 +93,8 @@ async function detectGaps(question: string, libraryId: string): Promise<string[]
   }
   const seen = new Set<string>()
   const gaps: string[] = []
-  for (const w of question.toLowerCase().split(/[^a-z0-9]+/)) {
-    if (w.length >= 4 && !STOPWORDS.has(w) && !known.has(w) && !seen.has(w)) {
+  for (const w of gapTokens(question)) {
+    if (!known.has(w) && !seen.has(w)) {
       seen.add(w)
       gaps.push(w)
     }
