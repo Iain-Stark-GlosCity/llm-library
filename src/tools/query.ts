@@ -1,5 +1,5 @@
 // library_query — hybrid retrieval over curated wiki pages (default) and/or raw chunks.
-// Dense + sparse vectors fused by Qdrant RRF. Mechanical gap detection from manifest.
+// Dense + sparse vectors fused by Qdrant RRF. Mechanical gap detection from manifest and returned results.
 // See CLAUDE.md "library_query".
 
 import { randomUUID } from 'crypto'
@@ -12,6 +12,20 @@ import { embed } from '../embed/openai'
 import { chunkText } from '../embed/chunk'
 import { sparseVector, STOPWORDS } from '../embed/sparse'
 import { stripFrontmatter } from './shared'
+
+const GAP_QUERY_WORDS = new Set([
+  'about',
+  'find',
+  'get',
+  'look',
+  'lookup',
+  'retrieve',
+  'say',
+  'search',
+  'show',
+  'tell'
+])
+const GAP_STOPWORDS = new Set([...STOPWORDS, ...GAP_QUERY_WORDS])
 
 const CONFIDENCE_ORDER = ['unverified', 'low', 'medium', 'high']
 
@@ -59,7 +73,7 @@ function gapTokens(text: string): string[] {
   // tokenizing ordinary prose mechanically.
   for (const match of normalized.matchAll(/[a-z0-9]+(?:-[a-z0-9]+)*|[a-z0-9]+/g)) {
     const token = match[0]
-    if (token.length >= 4 && !STOPWORDS.has(token)) tokens.push(token)
+    if (token.length >= 4 && !GAP_STOPWORDS.has(token)) tokens.push(token)
   }
 
   return tokens
@@ -75,23 +89,52 @@ function knownGapTokens(text: string): string[] {
   const parts = (text || '')
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((part) => part.length > 0 && !STOPWORDS.has(part))
+    .filter((part) => part.length > 0 && !GAP_STOPWORDS.has(part))
   if (parts.length > 1) expanded.add(parts.join('-'))
 
   return [...expanded]
 }
 
-async function detectGaps(question: string, libraryId: string): Promise<string[]> {
+function addGapEvidenceTokens(known: Set<string>, text: string): void {
+  for (const w of knownGapTokens(text || '')) known.add(w)
+
+  // Returned bodies and metadata are stronger evidence than the catalogue. Also
+  // add component tokens so a query for `canary alpha` is satisfied by a body
+  // containing `smoke-test-canary-alpha-20260531`.
+  for (const part of (text || '').toLowerCase().split(/[^a-z0-9]+/)) {
+    if (part.length >= 4 && !GAP_STOPWORDS.has(part)) known.add(part)
+  }
+}
+
+interface GapResultEvidence {
+  content?: string
+  title?: string
+  filename?: string
+  tags?: string[]
+  source_id?: string
+}
+
+async function detectGaps(
+  question: string,
+  libraryId: string,
+  resultEvidence: GapResultEvidence[] = []
+): Promise<string[]> {
   const { manifest } = await readManifest(libraryId)
   const known = new Set<string>()
-  const add = (s: string) => {
-    for (const w of knownGapTokens(s || '')) known.add(w)
-  }
+  const add = (s: string) => addGapEvidenceTokens(known, s)
   for (const p of manifest.pages) {
     add(p.title)
     add(p.domain)
     for (const t of p.tags || []) add(t)
   }
+  for (const result of resultEvidence) {
+    add(result.content || '')
+    add(result.title || '')
+    add(result.filename || '')
+    add(result.source_id || '')
+    for (const tag of result.tags || []) add(tag)
+  }
+
   const seen = new Set<string>()
   const gaps: string[] = []
   for (const w of gapTokens(question)) {
@@ -172,11 +215,12 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   const wiki = await getWikiContainer()
   const raw = await getRawContainer()
   const results: unknown[] = []
+  const gapEvidence: GapResultEvidence[] = []
   for (const h of top) {
     const p = h.payload
     if (p.record_type === 'wiki_page') {
       const blob = await readBlob(wiki, `pages/${p.filename}`)
-      results.push({
+      const result = {
         type: 'wiki_page',
         kind: 'curated', // maintained knowledge record
         filename: p.filename,
@@ -186,11 +230,18 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         status: p.status,
         domain: p.domain,
         score: h.score
+      }
+      results.push(result)
+      gapEvidence.push({
+        content: result.content,
+        title: result.title,
+        filename: result.filename,
+        tags: Array.isArray(p.tags) ? p.tags : []
       })
     } else {
       const blob = await readBlob(raw, p.source_id)
       const chunk = blob ? chunkText(blob.content)[p.chunk_index] ?? '' : ''
-      results.push({
+      const result = {
         type: 'raw_chunk',
         kind: 'raw_evidence', // unverified source material, not maintained knowledge
         source_id: p.source_id,
@@ -199,11 +250,17 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         content: chunk,
         domain: p.domain,
         score: h.score
+      }
+      results.push(result)
+      gapEvidence.push({
+        content: result.content,
+        title: result.title,
+        source_id: result.source_id
       })
     }
   }
 
-  const gaps = await detectGaps(question, libraryId)
+  const gaps = await detectGaps(question, libraryId, gapEvidence)
   const queryId = randomUUID()
 
   const log = await appendLog({
@@ -223,7 +280,7 @@ export const queryTool: ToolDefinition = {
   description:
     'Retrieve curated wiki pages (default) or raw source chunks by hybrid semantic + ' +
     'keyword search. Supports domain/confidence filtering and reports mechanical gaps ' +
-    '(question terms not found in the catalogue).',
+    '(question terms not found in the catalogue or returned results).',
   inputSchema,
   handler: (input) => toEnvelope(() => queryImpl(input))
 }

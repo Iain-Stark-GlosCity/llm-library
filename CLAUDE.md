@@ -612,13 +612,18 @@ This is a filtering order only. unverified means not yet assessed, not assessed 
 Gap detection is mechanical. Do not interpret prose.
 Strip common stopwords before gap detection (also, been, does, from, have, into,
 more, says, some, that, their, them, then, there, this, were, what, when, where,
-which, will, with, your). Report as gaps: remaining word or identifier tokens of
-4+ characters from the question that do not match any title, tag, or domain field
-in manifest.json. Preserve hyphenated identifiers (for example,
-`find-canary-alpha-20260531`) as a single gap candidate instead of reporting each
-component as a separate missing concept. Gaps are informational only and do not
-indicate retrieval failure; the librarian decides whether they indicate missing
-knowledge.
+which, will, with, your) and query/command words (about, find, get, look,
+lookup, retrieve, say, search, show, tell). Report as gaps: remaining word or
+identifier tokens of 4+ characters from the question that do not match any title,
+tag, or domain field in manifest.json and do not appear in returned result
+evidence. Returned result evidence includes page/chunk content, title, filename,
+tags, and source_id.
+Preserve hyphenated identifiers (for example, `find-canary-alpha-20260531`) as a
+single gap candidate instead of reporting each component as a separate missing
+concept, while returned evidence also contributes component tokens so spaced
+queries can match hyphenated result bodies. Gaps are informational only and do
+not indicate retrieval failure; the librarian decides whether they indicate
+missing knowledge.
 
 Deduplication:
 
@@ -640,8 +645,9 @@ Steps:
 1. Trim to top_k.
 1. Fetch actual page/chunk content from blob storage for each result.
 1. Mechanical gap detection: word or identifier tokens 4+ chars from question
-   (stopwords stripped, hyphenated identifiers preserved) with no match in
-   manifest.json title/tag/domain. Informational only.
+   (stopwords and command words stripped, hyphenated identifiers preserved) with
+   no match in manifest.json title/tag/domain or fetched result evidence
+   (content, title, filename, tags, source_id). Informational only.
 1. Append logs. Failure = warning only.
 
 -----
