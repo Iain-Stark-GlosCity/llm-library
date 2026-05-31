@@ -13,8 +13,19 @@ import { chunkText } from '../embed/chunk'
 import { sparseVector, STOPWORDS } from '../embed/sparse'
 import { stripFrontmatter } from './shared'
 
-const GAP_COMMAND_WORDS = new Set(['find', 'show', 'get', 'search', 'retrieve', 'look', 'lookup'])
-const GAP_STOPWORDS = new Set([...STOPWORDS, ...GAP_COMMAND_WORDS])
+const GAP_QUERY_WORDS = new Set([
+  'about',
+  'find',
+  'get',
+  'look',
+  'lookup',
+  'retrieve',
+  'say',
+  'search',
+  'show',
+  'tell'
+])
+const GAP_STOPWORDS = new Set([...STOPWORDS, ...GAP_QUERY_WORDS])
 
 const CONFIDENCE_ORDER = ['unverified', 'low', 'medium', 'high']
 

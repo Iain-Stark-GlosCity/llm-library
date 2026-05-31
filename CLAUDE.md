@@ -612,11 +612,12 @@ This is a filtering order only. unverified means not yet assessed, not assessed 
 Gap detection is mechanical. Do not interpret prose.
 Strip common stopwords before gap detection (also, been, does, from, have, into,
 more, says, some, that, their, them, then, there, this, were, what, when, where,
-which, will, with, your) and command words (find, show, get, search, retrieve,
-look, lookup). Report as gaps: remaining word or identifier tokens of 4+
-characters from the question that do not match any title, tag, or domain field in
-manifest.json and do not appear in returned result evidence. Returned result
-evidence includes page/chunk content, title, filename, tags, and source_id.
+which, will, with, your) and query/command words (about, find, get, look,
+lookup, retrieve, say, search, show, tell). Report as gaps: remaining word or
+identifier tokens of 4+ characters from the question that do not match any title,
+tag, or domain field in manifest.json and do not appear in returned result
+evidence. Returned result evidence includes page/chunk content, title, filename,
+tags, and source_id.
 Preserve hyphenated identifiers (for example, `find-canary-alpha-20260531`) as a
 single gap candidate instead of reporting each component as a separate missing
 concept, while returned evidence also contributes component tokens so spaced
