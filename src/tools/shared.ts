@@ -37,6 +37,8 @@ export interface FrontmatterInput {
   sources: string[]
   related: string[]
   review_after?: string
+  reviewed_by?: string
+  reviewed_at?: string
   created: string
   updated: string
 }
@@ -53,6 +55,8 @@ export function renderFrontmatter(fm: FrontmatterInput): string {
   lines.push(`sources:${yamlList(fm.sources)}`)
   lines.push(`related:${yamlList(fm.related)}`)
   if (fm.review_after) lines.push(`review_after: ${fm.review_after}`)
+  if (fm.reviewed_by) lines.push(`reviewed_by: ${yamlScalar(fm.reviewed_by)}`)
+  if (fm.reviewed_at) lines.push(`reviewed_at: ${fm.reviewed_at}`)
   lines.push(`created: ${fm.created}`)
   lines.push(`updated: ${fm.updated}`)
   lines.push('---')
@@ -74,6 +78,14 @@ export function stripFrontmatter(md: string): string {
   const afterFence = md.indexOf('\n', end + 1)
   if (afterFence < 0) return ''
   return md.slice(afterFence + 1).replace(/^\s+/, '')
+}
+
+export function inlineSourceIds(markdown: string): string[] {
+  const ids = new Set<string>()
+  for (const match of markdown.matchAll(/\[source:\s*([^\]\s]+)\s*\]/g)) {
+    ids.add(match[1])
+  }
+  return [...ids]
 }
 
 export function daysSince(iso: string): number {

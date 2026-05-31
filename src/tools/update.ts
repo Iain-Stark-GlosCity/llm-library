@@ -13,7 +13,7 @@ import { ensureCollection, upsertPoints, QdrantPoint } from '../storage/qdrant'
 import { embed } from '../embed/openai'
 import { wikiPagePointId } from '../embed/ids'
 import { sparseVector } from '../embed/sparse'
-import { renderFrontmatter, extractCreated } from './shared'
+import { renderFrontmatter, extractCreated, inlineSourceIds } from './shared'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
 
@@ -30,6 +30,8 @@ const inputSchema = {
     summary: { type: 'string', maxLength: 200 },
     status: { type: 'string', enum: ['draft', 'active', 'deprecated'] },
     review_after: { type: 'string' },
+    reviewed_by: { type: 'string', maxLength: 120 },
+    reviewed_at: { type: 'string' },
     sources: { type: 'array', items: { type: 'string' } },
     related: { type: 'array', items: { type: 'string' } },
     library_id: { type: 'string' }
@@ -88,6 +90,8 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const confidence: string = a.confidence
   const summary: string = a.summary
   const reviewAfter: string | undefined = typeof a.review_after === 'string' ? a.review_after : undefined
+  const reviewedBy: string | undefined = typeof a.reviewed_by === 'string' && a.reviewed_by ? a.reviewed_by : undefined
+  const reviewedAt: string | undefined = typeof a.reviewed_at === 'string' && a.reviewed_at ? a.reviewed_at : undefined
   if (a.sources !== undefined && (!Array.isArray(a.sources) || !a.sources.every((s: unknown) => typeof s === 'string'))) {
     throw new DomainException('VALIDATION_ERROR', 'sources must be an array of strings')
   }
@@ -98,6 +102,52 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const related: string[] = a.related ?? []
   const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
+  if (reviewAfter && Number.isNaN(Date.parse(reviewAfter))) {
+    throw new DomainException('VALIDATION_ERROR', 'review_after must be an ISO date or timestamp')
+  }
+  if (reviewedAt && Number.isNaN(Date.parse(reviewedAt))) {
+    throw new DomainException('VALIDATION_ERROR', 'reviewed_at must be an ISO date or timestamp')
+  }
+
+  const warnings: string[] = []
+  const nowIso = new Date().toISOString()
+
+  // 2. Validate source/citation integrity before any durable write. Source IDs that
+  // appear in either sources[] or inline [source: ...] markers must already exist in
+  // raw_manifest.json (via library_ingest or library_register_source). Active and
+  // high-confidence pages additionally require explicit review metadata and citations.
+  const { manifest: rawManifest } = await readRawManifest(libraryId)
+  const knownSources = new Set(rawManifest.sources.map((s) => s.source_id))
+  const sourceSet = new Set(sources)
+  const inlineSources = inlineSourceIds(content)
+  const inlineSourceSet = new Set(inlineSources)
+
+  const unknownMetadataSources = sources.filter((s) => !knownSources.has(s))
+  if (unknownMetadataSources.length > 0) {
+    throw new DomainException('VALIDATION_ERROR', `sources[] contains unknown source_id(s): ${unknownMetadataSources.join(', ')}`)
+  }
+  const unknownInlineSources = inlineSources.filter((s) => !knownSources.has(s))
+  if (unknownInlineSources.length > 0) {
+    throw new DomainException('VALIDATION_ERROR', `inline citations reference unknown source_id(s): ${unknownInlineSources.join(', ')}`)
+  }
+  const inlineNotInMetadata = inlineSources.filter((s) => !sourceSet.has(s))
+  if (inlineNotInMetadata.length > 0) {
+    throw new DomainException('VALIDATION_ERROR', `inline citations must be listed in sources[]: ${inlineNotInMetadata.join(', ')}`)
+  }
+  const metadataNotInline = sources.filter((s) => !inlineSourceSet.has(s))
+  if ((status === 'active' || confidence === 'high') && sources.length === 0) {
+    throw new DomainException('VALIDATION_ERROR', `${status === 'active' ? 'active' : 'high-confidence'} pages require at least one source_id in sources[]`)
+  }
+  if ((status === 'active' || confidence === 'high') && inlineSources.length === 0) {
+    throw new DomainException('VALIDATION_ERROR', `${status === 'active' ? 'active' : 'high-confidence'} pages require at least one inline [source: <source_id>] marker`)
+  }
+  if (confidence === 'high' && metadataNotInline.length > 0) {
+    throw new DomainException('VALIDATION_ERROR', `high-confidence pages require every sources[] ID to be cited inline: ${metadataNotInline.join(', ')}`)
+  }
+  if (status === 'active' && (!reviewedBy || !reviewedAt)) {
+    throw new DomainException('VALIDATION_ERROR', 'active pages require reviewed_by and reviewed_at metadata')
+  }
+
   // Synthesis pages represent the current best understanding of a domain. They carry
   // stricter conventions than concept pages: always active, always sourced, always
   // reviewable. See the synthesis design.
@@ -105,21 +155,10 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
     if (status !== 'active') {
       throw new DomainException('VALIDATION_ERROR', 'synthesis pages must have status: active (never draft)')
     }
-    if (sources.length === 0) {
-      throw new DomainException('VALIDATION_ERROR', 'synthesis pages must include at least one source_id')
-    }
     if (!reviewAfter) {
       throw new DomainException('VALIDATION_ERROR', 'synthesis pages require review_after (ISO date)')
     }
   }
-
-  const warnings: string[] = []
-  const nowIso = new Date().toISOString()
-
-  // 2. Validate sources against raw_manifest.json (warn, do not fail).
-  const { manifest: rawManifest } = await readRawManifest(libraryId)
-  const knownSources = new Set(rawManifest.sources.map((s) => s.source_id))
-  for (const s of sources) if (!knownSources.has(s)) warnings.push(`unknown_source:${s}`)
 
   // 3. Read existing page; preserve created; capture ETag.
   const wiki = await getWikiContainer()
@@ -146,6 +185,8 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
     sources,
     related,
     review_after: reviewAfter,
+    reviewed_by: reviewedBy,
+    reviewed_at: reviewedAt,
     created,
     updated: nowIso
   })
@@ -213,6 +254,8 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
       sources,
       related,
       review_after: reviewAfter,
+      reviewed_by: reviewedBy,
+      reviewed_at: reviewedAt,
       created,
       updated: nowIso,
       embedding_status: embeddingStatus

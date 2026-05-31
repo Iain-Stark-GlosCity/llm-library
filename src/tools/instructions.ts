@@ -16,15 +16,16 @@ const DOCTRINE = {
     'Curated pages are the maintained knowledge records.',
     'Vector search is an access path, not the knowledge itself.',
     'Query results are not automatically true — weigh confidence and sources.',
-    'High confidence requires source support and review.',
+    'High confidence requires source support, inline citations, and review.',
     'Contradictions should be represented, not smoothed away.',
-    'Deprecated material should not be used by default.'
+    'Deprecated material should not be used by default.',
+    'Normal agents run in read-only mode; mutating tools require librarian/editor mode.'
   ],
 
   librarian_workflow: [
     '0. Get the domain schema (library_get_schema) to learn domain-specific rules; inherit the global doctrine if none.',
     '1. Ingest the raw source (library_ingest) or register it (library_register_source).',
-    '2. Query raw evidence and existing curated pages (library_query).',
+    '2. Query raw evidence and existing curated pages (library_query), scoped to the known domain by default.',
     '3. Decide whether the source adds, changes, or contradicts current knowledge.',
     '4. Update the concept page(s) (library_update) with sources[] and related[] links.',
     '5. Update or create the domain synthesis page if the domain now has 3+ active pages or the synthesis is stale.',
@@ -39,11 +40,12 @@ const DOCTRINE = {
     library_get_schema: 'Read the per-domain schema layered on top of this doctrine.',
     library_list_pages: 'List the curated catalogue (from manifest.json).',
     library_get_page: 'Fetch a single curated page by filename.',
-    library_query: 'Hybrid retrieval over curated pages (default) and/or raw chunks.',
+    library_query: 'Hybrid retrieval over curated pages (default) and/or raw chunks. Requires domain by default; set allow_cross_domain only for deliberate discovery.',
     library_ingest: 'Store raw source material: chunk, embed, index.',
     library_register_source: 'Register a citable source by metadata, without a full ingest.',
     library_update: 'Create or update a curated wiki page (the only curated write path).',
     library_update_schema: 'Create or overwrite a per-domain schema file.',
+    library_deprecate_page: 'Mark a curated page deprecated as a cleanup/retirement path.',
     library_lint: 'Mechanical health checks over the wiki.'
   },
 
@@ -54,16 +56,19 @@ const DOCTRINE = {
   },
 
   citation_convention: {
-    rule: 'Every active page must have sources[] metadata AND at least one inline [source: ...] marker in the body.',
+    rule: 'Every active page must have sources[] metadata, reviewed_by/reviewed_at metadata, AND at least one inline [source: ...] marker in the body.',
     syntax: '[source: <source_id>]',
     example: '[source: claude-build-13]',
-    note: 'Cited source_ids should exist in raw_manifest.json — ingest or register them first.'
+    note: 'Cited source_ids must exist in raw_manifest.json and be listed in sources[] — ingest or register them first.'
   },
 
   status_model:
     'library_update defaults new pages to status: draft. Promote to active deliberately, ' +
-    'once the page has sources and has been reviewed. Use deprecated to retire a page; ' +
-    'deprecated pages are excluded from default queries.'
+    'once the page has sources, inline citations, and reviewed_by/reviewed_at metadata. ' +
+    'Use library_deprecate_page or status: deprecated to retire a page; deprecated pages are excluded from default queries.',
+
+  modes:
+    'Default LIBRARY_MCP_MODE is read_only, exposing only query/retrieval/lint tools. Set LIBRARY_MCP_MODE=librarian to expose library_ingest, library_register_source, library_update, library_update_schema, and library_deprecate_page.'
 }
 
 const inputSchema = {

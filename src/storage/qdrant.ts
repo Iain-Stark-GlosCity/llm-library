@@ -165,3 +165,17 @@ export async function scrollPoints(filter: unknown, limit = 100): Promise<Qdrant
   } while (offset !== null && offset !== undefined)
   return all
 }
+
+export async function setPayload(points: Array<string | number>, payload: Record<string, unknown>): Promise<void> {
+  if (points.length === 0) return
+  const { url, collection, apiKey } = conn()
+  const resp = await fetch(`${url}/collections/${collection}/points/payload?wait=true`, {
+    method: 'POST',
+    headers: headers(apiKey),
+    body: JSON.stringify({ points, payload })
+  })
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new DomainException('STORAGE_ERROR', `Qdrant payload update failed: ${resp.status} ${text}`)
+  }
+}

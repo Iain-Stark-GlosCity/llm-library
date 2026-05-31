@@ -11,6 +11,7 @@ export interface Config {
   qdrantCollection: string
   openaiApiKey: string
   embeddingModel: string
+  mcpMode: 'read_only' | 'librarian'
 }
 
 export function getConfig(): Config {
@@ -23,6 +24,7 @@ export function getConfig(): Config {
     qdrantApiKey: process.env.QDRANT_API_KEY || undefined,
     qdrantCollection: process.env.QDRANT_COLLECTION || 'library',
     openaiApiKey: process.env.OPENAI_API_KEY || '',
-    embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-3-small'
+    embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
+    mcpMode: process.env.LIBRARY_MCP_MODE === 'librarian' ? 'librarian' : 'read_only'
   }
 }
