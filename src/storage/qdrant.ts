@@ -166,6 +166,22 @@ export async function scrollPoints(filter: unknown, limit = 100): Promise<Qdrant
   return all
 }
 
+// Hard-delete points by id. Used when a wiki page or raw source blob is deleted so the
+// matching vector cannot resurface in queries with stale/empty content.
+export async function deletePoints(points: Array<string | number>): Promise<void> {
+  if (points.length === 0) return
+  const { url, collection, apiKey } = conn()
+  const resp = await fetch(`${url}/collections/${collection}/points/delete?wait=true`, {
+    method: 'POST',
+    headers: headers(apiKey),
+    body: JSON.stringify({ points })
+  })
+  if (!resp.ok) {
+    const text = await resp.text().catch(() => '')
+    throw new DomainException('STORAGE_ERROR', `Qdrant delete failed: ${resp.status} ${text}`)
+  }
+}
+
 export async function setPayload(points: Array<string | number>, payload: Record<string, unknown>): Promise<void> {
   if (points.length === 0) return
   const { url, collection, apiKey } = conn()

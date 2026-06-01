@@ -47,7 +47,9 @@ const DOCTRINE = {
       'The only mutating tool (librarian mode only). Pick an operation: "ingest" (store + ' +
       'chunk + embed raw source), "register_source" (register a citable source by metadata), ' +
       '"update_page" (the only curated wiki write path), "update_schema" (create/overwrite a ' +
-      'per-domain schema), "deprecate_page" (retire a page).',
+      'per-domain schema), "deprecate_page" (soft-retire a page — preferred), "delete_blob" ' +
+      '(irreversibly hard-delete a stale Azure blob and purge its vector; use only when ' +
+      'soft-retirement is not enough, e.g. lint-flagged orphans or dead raw sources).',
     library_lint: 'Mechanical health checks over the wiki.'
   },
 
@@ -67,7 +69,8 @@ const DOCTRINE = {
   status_model:
     'library_write (operation: update_page) defaults new pages to status: draft. Promote to active ' +
     'deliberately, once the page has sources, inline citations, and reviewed_by/reviewed_at metadata. ' +
-    'Use library_write (operation: deprecate_page) or status: deprecated to retire a page; deprecated pages are excluded from default queries.',
+    'Use library_write (operation: deprecate_page) or status: deprecated to retire a page; deprecated pages are excluded from default queries. ' +
+    'Prefer soft-retirement (deprecate) — it keeps history. When a blob must physically go (lint-flagged orphans, abandoned history, dead raw sources), library_write (operation: delete_blob) hard-deletes a single Azure blob and purges its vector; it is irreversible and refuses to touch registry/log blobs without force.',
 
   modes:
     'Default LIBRARY_MCP_MODE is read_only, exposing only the read tools: library_ping, library_info, library_query, and library_lint. Set LIBRARY_MCP_MODE=librarian to additionally expose the mutating library_write tool (operations: ingest, register_source, update_page, update_schema, deprecate_page).'

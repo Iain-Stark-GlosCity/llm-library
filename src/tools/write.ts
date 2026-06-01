@@ -12,6 +12,7 @@ import { registerSourceTool } from './register-source'
 import { updateTool } from './update'
 import { updateSchemaTool } from './update-schema'
 import { deprecatePageTool } from './deprecate-page'
+import { deleteBlobTool } from './delete-blob'
 
 // operation value → the underlying handler that performs it.
 const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
@@ -19,7 +20,8 @@ const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = 
   register_source: registerSourceTool.handler,
   update_page: updateTool.handler,
   update_schema: updateSchemaTool.handler,
-  deprecate_page: deprecatePageTool.handler
+  deprecate_page: deprecatePageTool.handler,
+  delete_blob: deleteBlobTool.handler
 }
 
 // Union of every field used by the underlying operations. Per-operation requirements
@@ -30,13 +32,15 @@ const inputSchema = {
   properties: {
     operation: {
       type: 'string',
-      enum: ['ingest', 'register_source', 'update_page', 'update_schema', 'deprecate_page'],
+      enum: ['ingest', 'register_source', 'update_page', 'update_schema', 'deprecate_page', 'delete_blob'],
       description:
         'Which write to perform. "ingest": store+chunk+embed a raw source (needs title, content, ' +
         'source_type). "register_source": register a citable source by metadata only (needs source_id, ' +
         'title). "update_page": create/update a curated wiki page (needs filename, title, content, ' +
         'page_type, domain, confidence, tags, summary). "update_schema": write a per-domain schema ' +
-        '(needs domain, schema). "deprecate_page": retire a page (needs filename, reason).'
+        '(needs domain, schema). "deprecate_page": soft-retire a page (needs filename, reason). ' +
+        '"delete_blob": hard-delete a stale blob from Azure (needs container, blob_path, reason) — ' +
+        'the irreversible cleanup escape hatch.'
     },
 
     // shared / ingest / register_source
@@ -63,8 +67,14 @@ const inputSchema = {
     // update_schema
     schema: { type: 'object' },
 
-    // deprecate_page
+    // deprecate_page + delete_blob
     reason: { type: 'string', maxLength: 500 },
+
+    // delete_blob
+    container: { type: 'string', enum: ['wiki', 'raw', 'schema'] },
+    blob_path: { type: 'string', maxLength: 1024 },
+    purge_vector: { type: 'boolean' },
+    force: { type: 'boolean' },
 
     library_id: { type: 'string' }
   },
@@ -92,8 +102,8 @@ export const writeTool: ToolDefinition = {
     'Mutating library operations (librarian mode only). Set `operation` to choose the write: ' +
     '"ingest" (store + chunk + embed a raw source), "register_source" (register a citable source ' +
     'by metadata only), "update_page" (the only curated wiki write path), "update_schema" (write a ' +
-    'per-domain schema), or "deprecate_page" (retire a page). Consolidates the former ingest / ' +
-    'register_source / update / update_schema / deprecate_page tools.',
+    'per-domain schema), "deprecate_page" (soft-retire a page), or "delete_blob" (hard-delete a ' +
+    'stale Azure blob, with optional Qdrant vector purge — the irreversible cleanup escape hatch).',
   inputSchema,
   handler: (input) => toEnvelope(() => writeImpl(input))
 }

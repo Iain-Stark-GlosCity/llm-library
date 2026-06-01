@@ -132,3 +132,16 @@ export async function listBlobs(container: ContainerClient, prefix: string): Pro
   }
   return names
 }
+
+// Hard-delete a blob (the librarian cleanup escape hatch). Idempotent: returns true if
+// the blob existed and was removed, false if it was already absent. Unlike writes there
+// is no ETag guard — deletion is unconditional by design.
+export async function deleteBlob(container: ContainerClient, blobName: string): Promise<boolean> {
+  const blob = container.getBlockBlobClient(blobName)
+  try {
+    const res = await blob.deleteIfExists()
+    return res.succeeded
+  } catch (err: any) {
+    throw new DomainException('STORAGE_ERROR', `Failed to delete ${blobName}: ${err.message}`)
+  }
+}
