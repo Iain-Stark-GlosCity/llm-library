@@ -39,8 +39,8 @@ const inputSchema = {
         'title). "update_page": create/update a curated wiki page (needs filename, title, content, ' +
         'page_type, domain, confidence, tags, summary). "update_schema": write a per-domain schema ' +
         '(needs domain, schema). "deprecate_page": soft-retire a page (needs filename, reason). ' +
-        '"delete_blob": hard-delete a stale blob from Azure (needs container, blob_path, reason) — ' +
-        'the irreversible cleanup escape hatch.'
+        '"delete_blob": hard-delete a stale object from Azure — blob + vector + registry entry ' +
+        '(needs container, blob_path, reason) — the irreversible cleanup escape hatch.'
     },
 
     // shared / ingest / register_source
@@ -74,6 +74,7 @@ const inputSchema = {
     container: { type: 'string', enum: ['wiki', 'raw', 'schema'] },
     blob_path: { type: 'string', maxLength: 1024 },
     purge_vector: { type: 'boolean' },
+    purge_manifest: { type: 'boolean' },
     force: { type: 'boolean' },
 
     library_id: { type: 'string' }
@@ -103,7 +104,7 @@ export const writeTool: ToolDefinition = {
     '"ingest" (store + chunk + embed a raw source), "register_source" (register a citable source ' +
     'by metadata only), "update_page" (the only curated wiki write path), "update_schema" (write a ' +
     'per-domain schema), "deprecate_page" (soft-retire a page), or "delete_blob" (hard-delete a ' +
-    'stale Azure blob, with optional Qdrant vector purge — the irreversible cleanup escape hatch).',
+    'stale Azure object — blob, vector, and registry entry — the irreversible cleanup escape hatch).',
   inputSchema,
   handler: (input) => toEnvelope(() => writeImpl(input))
 }

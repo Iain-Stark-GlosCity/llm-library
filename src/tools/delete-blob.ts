@@ -13,13 +13,22 @@
 //   - By default the matching Qdrant vector(s) are purged too (purge_vector), so a
 //     deleted page/source cannot resurface in queries with empty content. Set
 //     purge_vector: false to delete only the blob.
+//   - By default the matching registry entry is removed too (purge_manifest): the
+//     manifest.json page entry (+ index.md regen) for pages/{file}.md, or the
+//     raw_manifest.json source entry for a raw source_id. The registry is a SEPARATE
+//     store from the blob, so without this a deleted object leaves a phantom entry that
+//     lint still reports. Set purge_manifest: false to delete only the blob.
 //   - Deletion is idempotent: a missing blob returns deleted: false with a warning, not
-//     an error.
+//     an error. Because purge_manifest/purge_vector still run, re-invoking on an already
+//     deleted object cleans up a registry entry or vector left behind by an earlier
+//     blob-only delete.
 
 import { ContainerClient } from '@azure/storage-blob'
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { getWikiContainer, getRawContainer, getSchemaContainer, deleteBlob } from '../storage/blobs'
-import { readRawManifest } from '../storage/raw-manifest'
+import { readManifest, writeManifest } from '../storage/manifest'
+import { readRawManifest, writeRawManifest } from '../storage/raw-manifest'
+import { regenerateIndex } from '../storage/index'
 import { appendLog } from '../storage/log'
 import { ensureCollection, deletePoints } from '../storage/qdrant'
 import { wikiPagePointId, rawChunkPointId } from '../embed/ids'
@@ -41,6 +50,7 @@ const inputSchema = {
     blob_path: { type: 'string', maxLength: 1024 },
     reason: { type: 'string', maxLength: 500 },
     purge_vector: { type: 'boolean' },
+    purge_manifest: { type: 'boolean' },
     force: { type: 'boolean' },
     library_id: { type: 'string' }
   },
@@ -74,6 +84,7 @@ async function deleteBlobImpl(input: unknown): Promise<DomainEnvelope> {
   }
   const reason: string = a.reason.trim()
   const purgeVector = a.purge_vector !== false // default true
+  const purgeManifest = a.purge_manifest !== false // default true
   const force = a.force === true
   const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
   const containerName = container as ContainerName
@@ -125,6 +136,57 @@ async function deleteBlobImpl(input: unknown): Promise<DomainEnvelope> {
     }
   }
 
+  // Trim the matching registry entry. The manifest is a separate store from the blob, so
+  // skipping this leaves a phantom entry that list_pages and lint keep reporting.
+  let manifestEntryRemoved = false
+  let manifestUpdated = false
+  let indexUpdated = false
+  if (purgeManifest) {
+    try {
+      if (containerName === 'wiki' && blobPath.startsWith('pages/') && blobPath.endsWith('.md')) {
+        const filename = blobPath.slice('pages/'.length)
+        const { manifest, etag } = await readManifest(libraryId)
+        const before = manifest.pages.length
+        manifest.pages = manifest.pages.filter((p) => p.filename !== filename)
+        if (manifest.pages.length === before) {
+          warnings.push('no_manifest_entry')
+        } else {
+          manifestEntryRemoved = true
+          const mw = await writeManifest(manifest, etag)
+          if (mw.conflict) warnings.push('manifest_conflict')
+          else if (!mw.success) warnings.push('manifest_write_failed')
+          else {
+            manifestUpdated = true
+            try {
+              const iw = await regenerateIndex(manifest)
+              if (iw.conflict) warnings.push('index_conflict')
+              else if (!iw.success) warnings.push('index_write_failed')
+              else indexUpdated = true
+            } catch {
+              warnings.push('index_write_failed')
+            }
+          }
+        }
+      } else if (containerName === 'raw') {
+        const { manifest, etag } = await readRawManifest(libraryId)
+        const before = manifest.sources.length
+        manifest.sources = manifest.sources.filter((s) => s.source_id !== blobPath)
+        if (manifest.sources.length === before) {
+          warnings.push('no_manifest_entry')
+        } else {
+          manifestEntryRemoved = true
+          const rw = await writeRawManifest(manifest, etag)
+          if (rw.conflict) warnings.push('raw_manifest_conflict')
+          else if (!rw.success) warnings.push('raw_manifest_write_failed')
+          else manifestUpdated = true
+        }
+      }
+      // schema files and history/ copies have no registry entry — nothing to trim.
+    } catch (err) {
+      warnings.push('manifest_purge_failed', (err as Error).message)
+    }
+  }
+
   const log = await appendLog({
     ts: new Date().toISOString(),
     tool: 'library_write',
@@ -142,7 +204,10 @@ async function deleteBlobImpl(input: unknown): Promise<DomainEnvelope> {
       deleted: existed,
       existed,
       vector_purged: vectorPurged,
-      vector_points_deleted: vectorPointsDeleted
+      vector_points_deleted: vectorPointsDeleted,
+      manifest_entry_removed: manifestEntryRemoved,
+      manifest_updated: manifestUpdated,
+      index_updated: indexUpdated
     },
     warnings
   )
@@ -151,10 +216,14 @@ async function deleteBlobImpl(input: unknown): Promise<DomainEnvelope> {
 export const deleteBlobTool: ToolDefinition = {
   name: 'library_delete_blob',
   description:
-    'Hard-delete a single stale blob from Azure (librarian cleanup escape hatch). Requires ' +
-    'container (wiki | raw | schema), blob_path, and reason. By default also purges the ' +
-    'matching Qdrant vector(s) (purge_vector); set purge_vector: false to delete only the blob. ' +
-    'Refuses to delete structural registry/log blobs unless force: true. Idempotent.',
+    'Hard-delete a stale object from Azure (librarian cleanup escape hatch). Requires ' +
+    'container (wiki | raw | schema), blob_path, and reason. By default removes the whole ' +
+    'footprint: the blob, the matching Qdrant vector(s) (purge_vector), and the registry entry ' +
+    '— manifest.json + index.md for pages/{file}.md, or raw_manifest.json for a raw source_id ' +
+    '(purge_manifest). The registry is a separate store, so without purge_manifest a deleted ' +
+    'object leaves a phantom entry that lint keeps reporting. Set purge_vector/purge_manifest ' +
+    'false to delete only the blob. Refuses structural registry/log blobs unless force: true. ' +
+    'Idempotent: re-run on an already-deleted object to clean up a leftover entry or vector.',
   inputSchema,
   handler: (input) => toEnvelope(() => deleteBlobImpl(input))
 }
