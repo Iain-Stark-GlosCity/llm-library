@@ -53,6 +53,7 @@ const inputSchema = {
     source_type: { type: 'string', enum: ['primary', 'secondary', 'derived'] },
     source_url: { type: 'string' },
     upstream_id: { type: 'string', maxLength: 200 },
+    upstream_owner: { type: 'string', maxLength: 200 },
     source_id: { type: 'string', maxLength: 200 },
     domain: { type: 'string' },
 
@@ -66,6 +67,11 @@ const inputSchema = {
     review_after: { type: 'string' },
     reviewed_by: { type: 'string', maxLength: 120 },
     reviewed_at: { type: 'string' },
+    allowed_use: { type: 'array', items: { type: 'string' } },
+    prohibited_use: { type: 'array', items: { type: 'string' } },
+    last_source_check: { type: 'string' },
+    business_consequence_if_stale: { type: 'string', enum: ['low', 'medium', 'high'] },
+    invalidation_policy: { type: 'string', maxLength: 500 },
     sources: { type: 'array', items: { type: 'string' } },
     related: { type: 'array', items: { type: 'string' } },
 

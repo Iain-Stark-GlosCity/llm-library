@@ -9,6 +9,7 @@ import { listSchemaDomains, readSchema } from '../storage/schema'
 import { scrollPoints } from '../storage/qdrant'
 import { daysSince, inlineSourceIds } from './shared'
 import { computeSourceFreshness } from './freshness'
+import { isOperationalUse } from './governance'
 
 interface LintIssue {
   type: string
@@ -272,18 +273,98 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
   // a high-confidence page can cite a superseded snapshot. The librarian decides
   // whether to re-curate.
   const freshness = computeSourceFreshness(rawManifest.sources)
-  const ageThreshold = new Map<string, number | undefined>()
+  const sourceById = new Map(rawManifest.sources.map((s) => [s.source_id, s]))
+  // Per-domain schema cache: snapshot-age threshold + whether the domain has opted into
+  // the governance guard-rail checks. Loaded once per distinct active-page domain.
+  const domainSchema = new Map<string, { maxAge?: number; governanceRequired: boolean }>()
+  const schemaFor = async (domain: string) => {
+    if (!domainSchema.has(domain)) {
+      const schema = await readSchema(domain).catch(() => null)
+      const raw = schema?.max_snapshot_age_days
+      domainSchema.set(domain, {
+        maxAge: typeof raw === 'number' && raw > 0 ? raw : undefined,
+        governanceRequired: schema?.governance_required === true
+      })
+    }
+    return domainSchema.get(domain)!
+  }
   for (const p of pages) {
     if (p.status !== 'active') continue
-    if (!ageThreshold.has(p.domain)) {
-      const schema = await readSchema(p.domain).catch(() => null)
-      const raw = schema?.max_snapshot_age_days
-      ageThreshold.set(p.domain, typeof raw === 'number' && raw > 0 ? raw : undefined)
+    const { maxAge: threshold, governanceRequired } = await schemaFor(p.domain)
+
+    // Governance guard rails (only for domains that have opted in via schema). Naturally
+    // self-gating where they key off declared use, but the opt-in keeps the whole layer
+    // quiet for domains that have not adopted it yet.
+    if (governanceRequired) {
+      const allowed = p.allowed_use || []
+      const operational = allowed.filter((u) => isOperationalUse(u))
+      if (operational.length > 0) {
+        issues.push({
+          type: 'operational_use_not_permitted',
+          page: p.filename,
+          description: `allowed_use includes operational mode(s) ${operational.join(', ')} — the library must not authorise operational actions`,
+          severity: 'error',
+          suggested_fix: 'Remove operational modes from allowed_use; operational actions belong to deterministic systems.'
+        })
+      }
+      if (allowed.includes('public_guidance') && !p.last_source_check) {
+        issues.push({
+          type: 'public_guidance_without_last_source_check',
+          page: p.filename,
+          description: 'page permits public_guidance but has no last_source_check',
+          severity: 'warning',
+          suggested_fix: 'Verify the page against its sources and set last_source_check, or remove public_guidance from allowed_use.'
+        })
+      }
+      if (allowed.includes('decision_support') && !p.business_consequence_if_stale) {
+        issues.push({
+          type: 'decision_support_without_stale_risk',
+          page: p.filename,
+          description: 'page permits decision_support but does not declare business_consequence_if_stale',
+          severity: 'warning',
+          suggested_fix: 'Set business_consequence_if_stale (low|medium|high), or remove decision_support from allowed_use.'
+        })
+      }
+      if (p.business_consequence_if_stale === 'high' && !p.invalidation_policy) {
+        issues.push({
+          type: 'high_risk_page_without_invalidation_policy',
+          page: p.filename,
+          description: 'high stale-consequence page has no invalidation_policy',
+          severity: 'warning',
+          suggested_fix: 'Document an invalidation_policy describing when this page must be re-checked or retired.'
+        })
+      }
     }
-    const threshold = ageThreshold.get(p.domain)
+
     for (const sourceId of p.sources || []) {
       const f = freshness.get(sourceId)
       if (!f) continue // registered or unknown source: not a snapshot
+
+      // Currency-of-cited-source checks (governance-gated): unchecked since ingest, or
+      // marked changed upstream by revalidation (Phase 2).
+      if (governanceRequired) {
+        const src = sourceById.get(sourceId)
+        if (src?.upstream_status === 'changed') {
+          issues.push({
+            type: 'active_page_cites_stale_source',
+            page: p.filename,
+            source_id: sourceId,
+            description: `cited source "${sourceId}" is marked upstream_status: changed`,
+            severity: 'error',
+            suggested_fix: 'Re-ingest the upstream source and update this page to cite the fresh snapshot.'
+          })
+        } else if (!src?.last_upstream_check) {
+          issues.push({
+            type: 'active_page_cites_unchecked_source',
+            page: p.filename,
+            source_id: sourceId,
+            description: `cited source "${sourceId}" has never been revalidated against upstream (no last_upstream_check)`,
+            severity: 'info',
+            suggested_fix: 'Run upstream revalidation on the source to establish its currency.'
+          })
+        }
+      }
+
       if (f.superseded_by.length > 0) {
         const newest = f.superseded_by[f.superseded_by.length - 1]
         issues.push({

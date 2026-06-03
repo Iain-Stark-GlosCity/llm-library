@@ -14,6 +14,7 @@ import { embed } from '../embed/openai'
 import { wikiPagePointId } from '../embed/ids'
 import { sparseVector } from '../embed/sparse'
 import { renderFrontmatter, extractCreated, inlineSourceIds } from './shared'
+import { isUseMode, isOperationalUse } from './governance'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
 
@@ -32,6 +33,11 @@ const inputSchema = {
     review_after: { type: 'string' },
     reviewed_by: { type: 'string', maxLength: 120 },
     reviewed_at: { type: 'string' },
+    allowed_use: { type: 'array', items: { type: 'string' } },
+    prohibited_use: { type: 'array', items: { type: 'string' } },
+    last_source_check: { type: 'string' },
+    business_consequence_if_stale: { type: 'string', enum: ['low', 'medium', 'high'] },
+    invalidation_policy: { type: 'string', maxLength: 500 },
     sources: { type: 'array', items: { type: 'string' } },
     related: { type: 'array', items: { type: 'string' } },
     library_id: { type: 'string' }
@@ -108,6 +114,34 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   if (reviewedAt && Number.isNaN(Date.parse(reviewedAt))) {
     throw new DomainException('VALIDATION_ERROR', 'reviewed_at must be an ISO date or timestamp')
   }
+
+  // Governance metadata (all optional). allowed_use must be supported modes only — a page
+  // may never authorise an operational mode (formal/live/payment/enforcement); those belong
+  // to deterministic operational systems, not cached knowledge.
+  if (a.allowed_use !== undefined && (!Array.isArray(a.allowed_use) || !a.allowed_use.every((u: unknown) => typeof u === 'string'))) {
+    throw new DomainException('VALIDATION_ERROR', 'allowed_use must be an array of strings')
+  }
+  if (a.prohibited_use !== undefined && (!Array.isArray(a.prohibited_use) || !a.prohibited_use.every((u: unknown) => typeof u === 'string'))) {
+    throw new DomainException('VALIDATION_ERROR', 'prohibited_use must be an array of strings')
+  }
+  const allowedUse: string[] = a.allowed_use ?? []
+  const prohibitedUse: string[] = a.prohibited_use ?? []
+  for (const u of [...allowedUse, ...prohibitedUse]) {
+    if (!isUseMode(u)) throw new DomainException('VALIDATION_ERROR', `unknown use mode: ${u}`)
+  }
+  const selfAuthorisedOperational = allowedUse.filter((u) => isOperationalUse(u))
+  if (selfAuthorisedOperational.length > 0) {
+    throw new DomainException('VALIDATION_ERROR', `allowed_use may not include operational modes (${selfAuthorisedOperational.join(', ')}); operational actions belong to deterministic systems, not curated knowledge`)
+  }
+  const lastSourceCheck: string | undefined = typeof a.last_source_check === 'string' && a.last_source_check ? a.last_source_check : undefined
+  if (lastSourceCheck && Number.isNaN(Date.parse(lastSourceCheck))) {
+    throw new DomainException('VALIDATION_ERROR', 'last_source_check must be an ISO date or timestamp')
+  }
+  const businessConsequenceIfStale: string | undefined = typeof a.business_consequence_if_stale === 'string' && a.business_consequence_if_stale ? a.business_consequence_if_stale : undefined
+  if (businessConsequenceIfStale && !['low', 'medium', 'high'].includes(businessConsequenceIfStale)) {
+    throw new DomainException('VALIDATION_ERROR', 'business_consequence_if_stale must be low | medium | high')
+  }
+  const invalidationPolicy: string | undefined = typeof a.invalidation_policy === 'string' && a.invalidation_policy ? a.invalidation_policy : undefined
 
   const warnings: string[] = []
   const nowIso = new Date().toISOString()
@@ -187,6 +221,11 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
     review_after: reviewAfter,
     reviewed_by: reviewedBy,
     reviewed_at: reviewedAt,
+    allowed_use: allowedUse,
+    prohibited_use: prohibitedUse,
+    last_source_check: lastSourceCheck,
+    business_consequence_if_stale: businessConsequenceIfStale,
+    invalidation_policy: invalidationPolicy,
     created,
     updated: nowIso
   })
@@ -256,6 +295,11 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
       review_after: reviewAfter,
       reviewed_by: reviewedBy,
       reviewed_at: reviewedAt,
+      ...(allowedUse.length ? { allowed_use: allowedUse } : {}),
+      ...(prohibitedUse.length ? { prohibited_use: prohibitedUse } : {}),
+      ...(lastSourceCheck ? { last_source_check: lastSourceCheck } : {}),
+      ...(businessConsequenceIfStale ? { business_consequence_if_stale: businessConsequenceIfStale } : {}),
+      ...(invalidationPolicy ? { invalidation_policy: invalidationPolicy } : {}),
       created,
       updated: nowIso,
       embedding_status: embeddingStatus

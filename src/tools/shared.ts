@@ -39,6 +39,11 @@ export interface FrontmatterInput {
   review_after?: string
   reviewed_by?: string
   reviewed_at?: string
+  allowed_use?: string[]
+  prohibited_use?: string[]
+  last_source_check?: string
+  business_consequence_if_stale?: string
+  invalidation_policy?: string
   created: string
   updated: string
 }
@@ -57,6 +62,11 @@ export function renderFrontmatter(fm: FrontmatterInput): string {
   if (fm.review_after) lines.push(`review_after: ${fm.review_after}`)
   if (fm.reviewed_by) lines.push(`reviewed_by: ${yamlScalar(fm.reviewed_by)}`)
   if (fm.reviewed_at) lines.push(`reviewed_at: ${fm.reviewed_at}`)
+  if (fm.allowed_use && fm.allowed_use.length) lines.push(`allowed_use:${yamlList(fm.allowed_use)}`)
+  if (fm.prohibited_use && fm.prohibited_use.length) lines.push(`prohibited_use:${yamlList(fm.prohibited_use)}`)
+  if (fm.last_source_check) lines.push(`last_source_check: ${fm.last_source_check}`)
+  if (fm.business_consequence_if_stale) lines.push(`business_consequence_if_stale: ${fm.business_consequence_if_stale}`)
+  if (fm.invalidation_policy) lines.push(`invalidation_policy: ${yamlScalar(fm.invalidation_policy)}`)
   lines.push(`created: ${fm.created}`)
   lines.push(`updated: ${fm.updated}`)
   lines.push('---')

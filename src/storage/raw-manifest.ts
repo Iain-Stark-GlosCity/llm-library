@@ -16,6 +16,12 @@ export interface SourceEntry {
   // group snapshots for supersession detection (Challenge B). Optional: when absent,
   // source_url is used as the grouping key, so existing entries need no migration.
   upstream_id?: string
+  // Governance provenance (all optional, additive — existing entries need no migration).
+  // upstream_owner: who owns the authoritative source. last_upstream_check/upstream_status
+  // are written by upstream revalidation (Phase 2); until then currency is "unknown".
+  upstream_owner?: string
+  last_upstream_check?: string
+  upstream_status?: 'unknown' | 'current' | 'changed' | 'unreachable'
   created: string
   chunks_indexed: number
   embedding_status: 'ok' | 'failed'

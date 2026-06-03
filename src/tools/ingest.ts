@@ -22,6 +22,7 @@ const inputSchema = {
     source_type: { type: 'string', enum: ['primary', 'secondary', 'derived'] },
     source_url: { type: 'string' },
     upstream_id: { type: 'string' },
+    upstream_owner: { type: 'string' },
     domain: { type: 'string' },
     library_id: { type: 'string' }
   },
@@ -50,6 +51,7 @@ async function ingestImpl(input: unknown): Promise<DomainEnvelope> {
   const sourceType: string = a.source_type
   const sourceUrl: string = typeof a.source_url === 'string' ? a.source_url : ''
   const upstreamId: string = typeof a.upstream_id === 'string' ? a.upstream_id : ''
+  const upstreamOwner: string = typeof a.upstream_owner === 'string' ? a.upstream_owner : ''
   const domain: string = typeof a.domain === 'string' ? a.domain : ''
   const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
@@ -125,6 +127,7 @@ async function ingestImpl(input: unknown): Promise<DomainEnvelope> {
     domain,
     source_url: sourceUrl,
     ...(upstreamId ? { upstream_id: upstreamId } : {}),
+    ...(upstreamOwner ? { upstream_owner: upstreamOwner } : {}),
     created: now.toISOString(),
     chunks_indexed: chunksIndexed,
     embedding_status: embeddingStatus,

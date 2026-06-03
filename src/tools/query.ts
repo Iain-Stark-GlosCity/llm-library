@@ -5,8 +5,8 @@
 import { randomUUID } from 'crypto'
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { getWikiContainer, getRawContainer, readBlob } from '../storage/blobs'
-import { readManifest } from '../storage/manifest'
-import { readRawManifest } from '../storage/raw-manifest'
+import { readManifest, PageEntry } from '../storage/manifest'
+import { readRawManifest, SourceEntry } from '../storage/raw-manifest'
 import { appendLog } from '../storage/log'
 import { computeSourceFreshness, computePageFreshness, SourceFreshness } from './freshness'
 import { ensureCollection, hybridQuery, QdrantHit } from '../storage/qdrant'
@@ -213,18 +213,46 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   }
   const top = deduped.slice(0, topK)
 
-  // Cache-currency signal (Challenge B), independent of confidence. Map each curated
-  // result to the freshness of the snapshots it cites: stalest snapshot age, and whether
-  // a newer snapshot has superseded any of them. Computed from raw_manifest + the page's
-  // sources[]; only needed when wiki pages can appear in the results.
+  // Governed-answer envelope. Each curated result carries provenance (cited sources with
+  // owner/url/capture date, page review + permitted-use governance) and a currency
+  // (freshness) signal independent of confidence. All read from manifest + raw_manifest;
+  // governance metadata never lives in the vector. Only needed when wiki pages can appear.
   const wantWiki = scope === 'wiki' || scope === 'both'
-  const pageSources = new Map<string, string[]>()
+  const pageEntries = new Map<string, PageEntry>()
+  const sourceMeta = new Map<string, SourceEntry>()
   let sourceFreshness = new Map<string, SourceFreshness>()
   if (wantWiki) {
     const { manifest } = await readManifest(libraryId)
-    for (const pg of manifest.pages) pageSources.set(pg.filename, pg.sources || [])
+    for (const pg of manifest.pages) pageEntries.set(pg.filename, pg)
     const { manifest: rawManifest } = await readRawManifest(libraryId)
+    for (const s of rawManifest.sources) sourceMeta.set(s.source_id, s)
     sourceFreshness = computeSourceFreshness(rawManifest.sources)
+  }
+
+  // Build the provenance block for one curated page from its manifest entry.
+  const provenanceFor = (entry: PageEntry | undefined) => {
+    const citedIds = entry?.sources || []
+    return {
+      reviewed_by: entry?.reviewed_by ?? null,
+      reviewed_at: entry?.reviewed_at ?? null,
+      review_after: entry?.review_after ?? null,
+      last_source_check: entry?.last_source_check ?? null,
+      allowed_use: entry?.allowed_use ?? [],
+      prohibited_use: entry?.prohibited_use ?? [],
+      business_consequence_if_stale: entry?.business_consequence_if_stale ?? null,
+      invalidation_policy: entry?.invalidation_policy ?? null,
+      sources: citedIds.map((id) => {
+        const s = sourceMeta.get(id)
+        return {
+          source_id: id,
+          source_url: s?.source_url ?? null,
+          upstream_owner: s?.upstream_owner ?? null,
+          captured_at: s?.created ?? null,
+          upstream_status: s?.upstream_status ?? 'unknown',
+          last_upstream_check: s?.last_upstream_check ?? null
+        }
+      })
+    }
   }
 
   // Fetch content from blob storage for each result.
@@ -245,7 +273,8 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         confidence: p.confidence,
         status: p.status,
         domain: p.domain,
-        freshness: computePageFreshness(pageSources.get(p.filename) || [], sourceFreshness),
+        freshness: computePageFreshness(pageEntries.get(p.filename)?.sources || [], sourceFreshness),
+        provenance: provenanceFor(pageEntries.get(p.filename)),
         score: h.score
       }
       results.push(result)

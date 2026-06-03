@@ -17,6 +17,7 @@ const inputSchema = {
     source_id: { type: 'string', maxLength: 200 },
     upstream_id: { type: 'string', maxLength: 200 },
     source_url: { type: 'string', maxLength: 2048 },
+    upstream_owner: { type: 'string', maxLength: 200 },
     library_id: { type: 'string' }
   },
   required: ['source_id'],
@@ -31,8 +32,9 @@ async function setProvenanceImpl(input: unknown): Promise<DomainEnvelope> {
   }
   const hasUpstreamId = typeof a.upstream_id === 'string'
   const hasSourceUrl = typeof a.source_url === 'string'
-  if (!hasUpstreamId && !hasSourceUrl) {
-    throw new DomainException('VALIDATION_ERROR', 'provide at least one of upstream_id or source_url to set')
+  const hasUpstreamOwner = typeof a.upstream_owner === 'string'
+  if (!hasUpstreamId && !hasSourceUrl && !hasUpstreamOwner) {
+    throw new DomainException('VALIDATION_ERROR', 'provide at least one of upstream_id, source_url, or upstream_owner to set')
   }
 
   const sourceId: string = a.source_id
@@ -47,6 +49,7 @@ async function setProvenanceImpl(input: unknown): Promise<DomainEnvelope> {
 
   if (hasUpstreamId) entry.upstream_id = a.upstream_id
   if (hasSourceUrl) entry.source_url = a.source_url
+  if (hasUpstreamOwner) entry.upstream_owner = a.upstream_owner
 
   const w = await writeRawManifest(manifest, etag)
   if (w.conflict) throw new DomainException('CONFLICT', 'raw_manifest.json changed concurrently; retry')
@@ -66,6 +69,7 @@ async function setProvenanceImpl(input: unknown): Promise<DomainEnvelope> {
       source_id: sourceId,
       upstream_id: entry.upstream_id ?? '',
       source_url: entry.source_url ?? '',
+      upstream_owner: entry.upstream_owner ?? '',
       provenance_updated: true
     },
     warnings

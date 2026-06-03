@@ -18,6 +18,15 @@ export interface PageEntry {
   review_after?: string
   reviewed_by?: string
   reviewed_at?: string
+  // Governance metadata (all optional, additive — existing entries need no migration).
+  // allowed_use/prohibited_use draw from the governance vocabulary; last_source_check is
+  // when the curator last verified the page against its sources; business_consequence_if_stale
+  // is low|medium|high; invalidation_policy is free text describing when to invalidate.
+  allowed_use?: string[]
+  prohibited_use?: string[]
+  last_source_check?: string
+  business_consequence_if_stale?: string
+  invalidation_policy?: string
   created: string
   updated: string
   embedding_status: 'ok' | 'failed' | 'pending'

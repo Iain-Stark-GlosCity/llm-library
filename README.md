@@ -6,8 +6,9 @@ TypeScript).
 
 > **RAG retrieves evidence. MCP returns tools. This layer maintains knowledge.**
 >
-> But underneath, it is a data problem, not an AI one: an index and cache for
-> *analysis* — two hops from truth, not a system of record. Confidence is not currency.
+> But underneath, it is a data problem, not an AI one: a **derived, governed knowledge
+> layer** between systems of record and the AI channels that consume it — two hops from
+> truth, never a system of record. Confidence is not currency.
 
 -----
 
@@ -56,9 +57,10 @@ is the central risk, which is why the next section is about data, not AI.
 ## A data problem, not an AI problem
 
 It is tempting to frame this as an AI capability. It is more useful — and safer — to
-frame it as a data architecture, because that is where the risks live. Four concerns
-that should stay separate get blurred the moment you let an agent "just answer from
-the library":
+frame it as a data architecture, because that is where the risks live. It is a
+**derived, governed knowledge layer that sits between systems of record and the AI
+channels that consume it.** Five concerns that should stay separate get blurred the
+moment you let an agent "just answer from the library":
 
 - **System of record** — the authoritative origin of a fact. For these domains it is
   external: legislation.gov.uk, a council's constitution, a supplier register. It is
@@ -66,17 +68,22 @@ the library":
 - **Source of truth** — the system of record *as of now*. Also external, and only
   knowable by re-reading upstream.
 - **Operations** — live data that drives a decision in the moment. Needs freshness
-  guarantees.
+  guarantees and deterministic controls.
 - **Analysis** — derived, interpretive, lag-tolerant understanding.
+- **Governed interpretation** — approved organisational understanding, source-linked,
+  with explicit ownership, currency, review, and permitted use. This is the most the
+  library should aspire to be.
 
-These have different properties, and trying to serve all four with one store — or not
+These have different properties, and trying to serve all five with one store — or not
 knowing which one you are operating in — is where things go wrong.
 
-**This system is the analysis layer, and nothing more.** Concretely it is a
+**This system is a derived knowledge layer: analysis by default, and governed
+interpretation only where ownership, source currency, review, and permitted use are
+explicit.** It is never a system of record or a source of truth. Concretely it is a
 read-optimised **index and cache** sitting two hops from truth: `library-raw` is a
 point-in-time **snapshot** of an external system of record, and the wiki is a
-**derived view** over those snapshots. Neither layer is authoritative. Treating a
-curated page as the source of truth is a category error — it is a cache entry.
+**derived view** over those snapshots. Treating a curated page as the source of truth
+is a category error — it is a governed cache entry.
 
 Two consequences follow, and they are the whole reason to be careful.
 
@@ -175,9 +182,35 @@ same capabilities are exposed through fewer top-level tools.
 |---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 |`library_ping` |Health check. No dependencies. Call first to confirm the transport is working before touching storage. Returns safe diagnostics for missing configuration without exposing secret values.                                                                                                                                                                                                                                                       |
 |`library_info` |Read-only inspection. `resource: instructions` returns the operating doctrine. `resource: schema` returns the per-domain schema (needs `domain`). `resource: pages` returns the curated catalogue (optional `domain`/`status` filter). `resource: page` returns one page by filename.                                                                                                                                                           |
-|`library_query`|Hybrid retrieval over curated wiki pages (default) or raw source chunks. Uses dense semantic search and sparse keyword search fused together, so exact terminology like regulation numbers and defined terms surface reliably alongside semantic matches. Returns confidence levels, source links, a mechanical gap list, and a per-result **freshness** signal (stalest cited snapshot age, whether a newer snapshot exists) — currency reported independently of confidence.                                                  |
-|`library_write`|The only mutating tool (librarian mode only). Operations: `ingest` (store a raw source, chunk, embed), `register_source` (register a citable source by metadata without ingesting it), `update_page` (write or update a curated wiki page — the only path to the wiki), `update_schema` (write a per-domain schema), `deprecate_page` (soft-retire a page), `delete_blob` (hard-delete a stale object from storage, vector index, and registry), `set_provenance` (assign `upstream_id`/`source_url` to an existing source so stale-cache detection can group its snapshots).|
-|`library_lint` |Read-only mechanical health checks. Finds: orphan pages, pages missing source citations, open contradictions without resolution, broken cross-references, stale embeddings, unindexed sources, manifest/blob drift, and **stale cache** — `cites_superseded_source` (a newer snapshot of the same upstream exists), `snapshot_aged` (older than a domain threshold), `source_missing_upstream_id` (no upstream identity to group by). Does not interpret prose. Reports, does not fix.                                          |
+|`library_query`|Hybrid retrieval over curated wiki pages (default) or raw source chunks (dense + sparse fused, so exact terminology like regulation numbers surfaces reliably). Each curated result is a **governed answer**: `confidence` (extraction quality), a **freshness** block (stalest cited snapshot age, whether a newer snapshot exists), and a **provenance** block (cited `source_id`s with `source_url`, `upstream_owner`, capture date, `upstream_status`; plus page review and permitted-use). Confidence and currency are independent. Plus a mechanical gap list.|
+|`library_write`|The only mutating tool (librarian mode only). Operations: `ingest`, `register_source`, `update_page` (the only path to the wiki; carries governance metadata — `allowed_use`/`prohibited_use`, `last_source_check`, `business_consequence_if_stale`, `invalidation_policy`), `update_schema`, `deprecate_page`, `delete_blob` (hard-delete blob + vector + registry entry), `set_provenance` (assign `upstream_id`/`source_url`/`upstream_owner` to an existing source).|
+|`library_lint` |Read-only mechanical health checks. Finds: orphan pages, missing citations, open contradictions, broken refs, stale embeddings, unindexed sources, manifest/blob drift; **stale cache** (`cites_superseded_source`, `snapshot_aged`, `source_missing_upstream_id`); and — for domains that set `governance_required` — **governance** (`operational_use_not_permitted`, `public_guidance_without_last_source_check`, `decision_support_without_stale_risk`, `high_risk_page_without_invalidation_policy`, `active_page_cites_unchecked_source`, `active_page_cites_stale_source`). Reports, does not fix.|
+
+-----
+
+## Governed answers and permitted use
+
+Every curated answer can carry the governance a public-sector consumer needs to decide
+whether to rely on it: **provenance** (which sources, owned by whom, captured when, at
+what currency), **review** (`reviewed_at`, `last_source_check`), and **permitted use**.
+
+Pages declare `allowed_use` / `prohibited_use` from a fixed vocabulary. The library
+**supports**, with increasing guard rails:
+
+`analysis` · `drafting` · `staff_guidance` · `public_guidance` · `decision_support`
+
+It will **never** authorise the operational modes — `formal_decision`,
+`live_account_action`, `payment_action`, `enforcement_action`. `update_page` rejects
+them in `allowed_use`, and lint flags any that slip in. Crucially: **the library
+declares and warns on use; it cannot enforce it.** A returned answer is data — the hard
+block on acting from cached knowledge must live in the operational channel's controls,
+not here. Treating this layer as the enforcement point would repeat the
+cache-as-system-of-record error one level up.
+
+Governance is adopted **per domain**: the guard-rail lint checks only apply where a
+domain's schema sets `governance_required: true`. Existing domains stay quiet until they
+opt in — a controlled-pilot path, not a big-bang migration. None of this metadata lives
+in the vector index; it is stored in the manifests and enforced in the query/lint layer.
 
 -----
 

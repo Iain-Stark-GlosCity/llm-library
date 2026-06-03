@@ -21,6 +21,10 @@ export interface DomainSchema {
   // Snapshot age (days) past which library_lint flags cited snapshots as snapshot_aged
   // for pages in this domain. Drives the offline staleness signal (Challenge B).
   max_snapshot_age_days?: number
+  // Opt a domain into the governance guard-rail lint checks (permitted-use, stale-risk,
+  // currency-of-cited-sources). Off by default so existing domains stay quiet until they
+  // deliberately adopt the governance layer (controlled-pilot model).
+  governance_required?: boolean
   maintenance_notes?: string
   audience?: string
   [key: string]: unknown

@@ -20,6 +20,7 @@ const inputSchema = {
     domain: { type: 'string' },
     source_url: { type: 'string' },
     upstream_id: { type: 'string' },
+    upstream_owner: { type: 'string' },
     library_id: { type: 'string' }
   },
   required: ['source_id', 'title'],
@@ -44,6 +45,7 @@ async function registerSourceImpl(input: unknown): Promise<DomainEnvelope> {
   const domain: string = typeof a.domain === 'string' ? a.domain : ''
   const sourceUrl: string = typeof a.source_url === 'string' ? a.source_url : ''
   const upstreamId: string = typeof a.upstream_id === 'string' ? a.upstream_id : ''
+  const upstreamOwner: string = typeof a.upstream_owner === 'string' ? a.upstream_owner : ''
   const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
   const warnings: string[] = []
@@ -65,6 +67,7 @@ async function registerSourceImpl(input: unknown): Promise<DomainEnvelope> {
     domain,
     source_url: sourceUrl,
     ...(upstreamId ? { upstream_id: upstreamId } : {}),
+    ...(upstreamOwner ? { upstream_owner: upstreamOwner } : {}),
     created: existing?.created ?? new Date().toISOString(),
     chunks_indexed: 0,
     embedding_status: 'ok',

@@ -6,19 +6,31 @@ import { ToolDefinition, ok } from '../types'
 
 const DOCTRINE = {
   what_this_is:
-    'The LLM Library is a knowledge extension layer for AI agents. It is not ordinary ' +
-    'RAG and not only a deterministic MCP tool. RAG retrieves evidence. MCP returns ' +
-    'tools. This layer maintains knowledge: curated, versioned, source-linked pages an ' +
-    'agent can query as reusable memory.',
+    'The LLM Library is a derived, governed knowledge layer that sits between systems of ' +
+    'record and the AI channels that consume it. It is not ordinary RAG and not only a ' +
+    'deterministic MCP tool. RAG retrieves evidence. MCP returns tools. This layer maintains ' +
+    'curated, versioned, source-linked pages an agent can query as reusable memory. It is ' +
+    'analysis by default, and governed interpretation only where ownership, source currency, ' +
+    'review, and permitted use are explicit. It is never a system of record or a source of truth.',
+
+  layer_model: {
+    note: 'Keep these five concerns separate. The library is the last row — it must not be mistaken for the first two.',
+    system_of_record: 'Authoritative origin of a fact. External (legislation.gov.uk, a revenues system, an approved policy doc). Never this app.',
+    source_of_truth: 'The system of record as of now. External; only knowable by re-reading upstream.',
+    system_of_operation: 'Where action happens (revenues platform, case system, payment system). Needs deterministic controls.',
+    system_of_analysis: 'Where patterns are explored (reporting, query logs, gap analysis).',
+    llm_library: 'Derived governed knowledge layer: source-linked, AI-consumable pages supporting interpretation, guidance, and analysis — a governed cache, not the record.'
+  },
 
   authority_model: [
-    'Raw source material is evidence, not knowledge.',
-    'Curated pages are the maintained knowledge records.',
+    'Raw source material is a point-in-time snapshot of an external system of record — evidence, not truth.',
+    'Curated pages are governed interpretation: derived cache entries, not the record.',
     'Vector search is an access path, not the knowledge itself.',
-    'Query results are not automatically true — weigh confidence and sources.',
-    'High confidence requires source support, inline citations, and review.',
+    'Query results are not automatically true — weigh confidence AND currency, which are independent.',
+    'High confidence requires source support, inline citations, and review; it does not imply the source is current.',
     'Contradictions should be represented, not smoothed away.',
     'Deprecated material should not be used by default.',
+    'The library declares and warns on permitted use; it cannot enforce it. Operational actions (formal decisions, live account/payment/enforcement actions) belong to deterministic operational systems, never to cached knowledge.',
     'Normal agents run in read-only mode; mutating tools require librarian/editor mode.'
   ],
 
@@ -59,6 +71,19 @@ const DOCTRINE = {
     what: 'A synthesis page represents the current best understanding of a whole domain — what we know taken together, key relationships, open questions, and unresolved contradictions. It is not a summary of concept pages.',
     convention: '{domain}-synthesis.md, page_type: synthesis.',
     rules: 'Always status: active (never draft), at least one source, and review_after is required (they go stale faster than concept pages). related[] should link the domain’s active concept pages.'
+  },
+
+  governance_model: {
+    permitted_use:
+      'Pages may declare allowed_use / prohibited_use from a fixed vocabulary. The library SUPPORTS analysis, drafting, staff_guidance, public_guidance, decision_support — with increasing guard rails. It must NEVER authorise operational modes (formal_decision, live_account_action, payment_action, enforcement_action); update_page rejects them in allowed_use. The library declares and warns on use; the consuming channel enforces it.',
+    answer_envelope:
+      'library_query returns, per curated result: confidence (extraction quality), a freshness/currency block (stalest cited snapshot age, whether a newer snapshot exists), and a provenance block (cited source_ids with source_url, upstream_owner, capture date, upstream_status; plus the page review and permitted-use governance). Confidence and currency are independent axes.',
+    page_governance_fields:
+      'allowed_use, prohibited_use (permitted-use vocabulary); last_source_check (when the curator last verified the page against its sources); business_consequence_if_stale (low|medium|high); invalidation_policy (when to re-check or retire). All optional.',
+    source_provenance_fields:
+      'upstream_owner (who owns the authoritative source); upstream_id (grouping identity); last_upstream_check / upstream_status (set by upstream revalidation). Set provenance on existing sources with library_write (operation: set_provenance).',
+    opt_in:
+      'The governance guard-rail lint checks (permitted-use, stale-risk, source currency) only apply to domains whose schema sets governance_required: true. Adopt governance per domain (controlled pilot), not all at once.'
   },
 
   citation_convention: {
