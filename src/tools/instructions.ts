@@ -76,6 +76,8 @@ const DOCTRINE = {
   governance_model: {
     permitted_use:
       'Pages may declare allowed_use / prohibited_use from a fixed vocabulary. The library SUPPORTS analysis, drafting, staff_guidance, public_guidance, decision_support — with increasing guard rails. It must NEVER authorise operational modes (formal_decision, live_account_action, payment_action, enforcement_action); update_page rejects them in allowed_use. The library declares and warns on use; the consuming channel enforces it.',
+    answer_modes:
+      'Pass intended_use to library_query to get a per-result use_permitted decision. Low-bar modes (analysis, drafting, staff_guidance) pass unless the page prohibits them or restricts allowed_use; public_guidance additionally requires last_source_check and a non-superseded snapshot; decision_support additionally requires a declared business_consequence_if_stale and non-superseded snapshot. Each result carries use_notes explaining a refusal. An operational intended_use is refused outright — content is withheld with use_decision.permitted=false; the library is never the basis for an operational action.',
     answer_envelope:
       'library_query returns, per curated result: confidence (extraction quality), a freshness/currency block (stalest cited snapshot age, whether a newer snapshot exists), and a provenance block (cited source_ids with source_url, upstream_owner, capture date, upstream_status; plus the page review and permitted-use governance). Confidence and currency are independent axes.',
     page_governance_fields:

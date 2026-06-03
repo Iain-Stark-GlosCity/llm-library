@@ -9,6 +9,7 @@ import { readManifest, PageEntry } from '../storage/manifest'
 import { readRawManifest, SourceEntry } from '../storage/raw-manifest'
 import { appendLog } from '../storage/log'
 import { computeSourceFreshness, computePageFreshness, SourceFreshness } from './freshness'
+import { ALL_USE_MODES, isUseMode, isOperationalUse, evaluateUse } from './governance'
 import { ensureCollection, hybridQuery, QdrantHit } from '../storage/qdrant'
 import { embed } from '../embed/openai'
 import { chunkText } from '../embed/chunk'
@@ -41,6 +42,7 @@ const inputSchema = {
     min_confidence: { type: 'string', enum: ['high', 'medium', 'low', 'unverified'] },
     include_deprecated: { type: 'boolean' },
     allow_cross_domain: { type: 'boolean' },
+    intended_use: { type: 'string', enum: [...ALL_USE_MODES] },
     library_id: { type: 'string' }
   },
   required: ['question'],
@@ -169,10 +171,47 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   const includeDeprecated = a.include_deprecated === true
   const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
+  // Answer mode (C). When the caller declares intended_use, results carry a per-result
+  // use_permitted decision; an OPERATIONAL intent is blocked outright — the library is
+  // never the basis for formal/live/payment/enforcement actions, so it withholds content.
+  let intendedUse: string | undefined
+  if (a.intended_use !== undefined) {
+    if (typeof a.intended_use !== 'string' || !isUseMode(a.intended_use)) {
+      throw new DomainException('VALIDATION_ERROR', `intended_use must be one of: ${ALL_USE_MODES.join(', ')}`)
+    }
+    intendedUse = a.intended_use
+  }
+
   const warnings: string[] = []
   if (allowCrossDomain) warnings.push('cross_domain_query')
   if (scope !== 'wiki') warnings.push(`non_default_scope:${scope}`)
   const question: string = a.question
+
+  if (intendedUse && isOperationalUse(intendedUse)) {
+    const queryId = randomUUID()
+    const log = await appendLog({
+      ts: new Date().toISOString(),
+      tool: 'library_query',
+      action: `refused operational intended_use "${intendedUse}"`,
+      query_id: queryId
+    })
+    if (!log.ok) warnings.push('log_append_failed')
+    warnings.push('operational_use_refused')
+    return ok(
+      {
+        results: [],
+        gaps: [],
+        query_id: queryId,
+        use_decision: {
+          intended_use: intendedUse,
+          mode: 'operational',
+          permitted: false,
+          reason: 'Operational actions require deterministic systems with proper controls; curated knowledge must not be their basis. Content withheld.'
+        }
+      },
+      warnings
+    )
+  }
 
   await ensureCollection()
   const dense = (await embed(question))[0]
@@ -260,11 +299,14 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   const raw = await getRawContainer()
   const results: unknown[] = []
   const gapEvidence: GapResultEvidence[] = []
+  let usePermittedCount = 0
   for (const h of top) {
     const p = h.payload
     if (p.record_type === 'wiki_page') {
       const blob = await readBlob(wiki, `pages/${p.filename}`)
-      const result = {
+      const entry = pageEntries.get(p.filename)
+      const freshness = computePageFreshness(entry?.sources || [], sourceFreshness)
+      const result: Record<string, unknown> = {
         type: 'wiki_page',
         kind: 'curated', // maintained knowledge record
         filename: p.filename,
@@ -273,21 +315,33 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         confidence: p.confidence,
         status: p.status,
         domain: p.domain,
-        freshness: computePageFreshness(pageEntries.get(p.filename)?.sources || [], sourceFreshness),
-        provenance: provenanceFor(pageEntries.get(p.filename)),
+        freshness,
+        provenance: provenanceFor(entry),
         score: h.score
+      }
+      if (intendedUse) {
+        const d = evaluateUse(intendedUse, {
+          allowed_use: entry?.allowed_use,
+          prohibited_use: entry?.prohibited_use,
+          last_source_check: entry?.last_source_check ?? null,
+          business_consequence_if_stale: entry?.business_consequence_if_stale ?? null,
+          superseded: freshness.superseded
+        })
+        result.use_permitted = d.permitted
+        result.use_notes = d.notes
+        if (d.permitted) usePermittedCount++
       }
       results.push(result)
       gapEvidence.push({
-        content: result.content,
-        title: result.title,
-        filename: result.filename,
+        content: result.content as string,
+        title: result.title as string,
+        filename: result.filename as string,
         tags: Array.isArray(p.tags) ? p.tags : []
       })
     } else {
       const blob = await readBlob(raw, p.source_id)
       const chunk = blob ? chunkText(blob.content)[p.chunk_index] ?? '' : ''
-      const result = {
+      const result: Record<string, unknown> = {
         type: 'raw_chunk',
         kind: 'raw_evidence', // unverified source material, not maintained knowledge
         source_id: p.source_id,
@@ -297,11 +351,18 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         domain: p.domain,
         score: h.score
       }
+      if (intendedUse) {
+        // Raw evidence is not governed knowledge — usable for analysis only.
+        const permitted = intendedUse === 'analysis'
+        result.use_permitted = permitted
+        result.use_notes = permitted ? [] : ['raw_evidence_not_governed']
+        if (permitted) usePermittedCount++
+      }
       results.push(result)
       gapEvidence.push({
-        content: result.content,
-        title: result.title,
-        source_id: result.source_id
+        content: result.content as string,
+        title: result.title as string,
+        source_id: result.source_id as string
       })
     }
   }
@@ -318,15 +379,29 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   })
   if (!log.ok) warnings.push('log_append_failed')
 
-  return ok({ results, gaps, query_id: queryId }, warnings)
+  const useDecision = intendedUse
+    ? {
+        intended_use: intendedUse,
+        mode: 'supported',
+        permitted_count: usePermittedCount,
+        flagged_count: results.length - usePermittedCount
+      }
+    : undefined
+
+  return ok({ results, gaps, query_id: queryId, ...(useDecision ? { use_decision: useDecision } : {}) }, warnings)
 }
 
 export const queryTool: ToolDefinition = {
   name: 'library_query',
   description:
     'Retrieve curated wiki pages (default) or raw source chunks by hybrid semantic + ' +
-    'keyword search. Supports domain/confidence filtering and reports mechanical gaps ' +
-    '(question terms not found in the catalogue or returned results).',
+    'keyword search. Supports domain/confidence filtering and reports mechanical gaps. ' +
+    'Each curated result carries confidence, a freshness (currency) signal, and a ' +
+    'provenance block. Optionally declare intended_use (analysis | drafting | ' +
+    'staff_guidance | public_guidance | decision_support) to get a per-result ' +
+    'use_permitted decision with increasing guard rails; operational intents ' +
+    '(formal_decision | live_account_action | payment_action | enforcement_action) are ' +
+    'refused and content is withheld.',
   inputSchema,
   handler: (input) => toEnvelope(() => queryImpl(input))
 }
