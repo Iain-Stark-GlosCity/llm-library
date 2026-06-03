@@ -5,6 +5,9 @@ to AI agents as queryable tools. Built as an Azure Functions v4 app (Node 20 LTS
 TypeScript).
 
 > **RAG retrieves evidence. MCP returns tools. This layer maintains knowledge.**
+>
+> But underneath, it is a data problem, not an AI one: an index and cache for
+> *analysis* — two hops from truth, not a system of record. Confidence is not currency.
 
 -----
 
@@ -44,6 +47,53 @@ a different problem.
 This is not a chatbot. It is not a question-answering system. It is infrastructure —
 a knowledge layer that any MCP-capable AI agent can use as an extension of its
 working memory. The agent that queries it decides what to do with what it gets back.
+
+It is also not a system of record, and not a source of truth. Mistaking it for either
+is the central risk, which is why the next section is about data, not AI.
+
+-----
+
+## A data problem, not an AI problem
+
+It is tempting to frame this as an AI capability. It is more useful — and safer — to
+frame it as a data architecture, because that is where the risks live. Four concerns
+that should stay separate get blurred the moment you let an agent "just answer from
+the library":
+
+- **System of record** — the authoritative origin of a fact. For these domains it is
+  external: legislation.gov.uk, a council's constitution, a supplier register. It is
+  never this app.
+- **Source of truth** — the system of record *as of now*. Also external, and only
+  knowable by re-reading upstream.
+- **Operations** — live data that drives a decision in the moment. Needs freshness
+  guarantees.
+- **Analysis** — derived, interpretive, lag-tolerant understanding.
+
+These have different properties, and trying to serve all four with one store — or not
+knowing which one you are operating in — is where things go wrong.
+
+**This system is the analysis layer, and nothing more.** Concretely it is a
+read-optimised **index and cache** sitting two hops from truth: `library-raw` is a
+point-in-time **snapshot** of an external system of record, and the wiki is a
+**derived view** over those snapshots. Neither layer is authoritative. Treating a
+curated page as the source of truth is a category error — it is a cache entry.
+
+Two consequences follow, and they are the whole reason to be careful.
+
+**Confidence is not currency.** A page's confidence grade reflects how cleanly the
+underlying material was extracted — a tidy three-line provision scores high, a
+truncated 200-paragraph fetch scores medium. It says nothing about whether the cited
+provision has since been amended. A high-confidence page can be badly out of date.
+The two are independent axes.
+
+**Caching means cache invalidation.** A snapshot is stale against upstream the moment
+it is taken; a curated page is stale against its snapshot once the source is re-read
+and changes. The business consequence of answering from stale cache — a superseded
+regulation cited into a live procurement or planning decision — is the failure mode
+this design has to respect. `library_lint`, `review_after`, and the confidence grades
+are partial, mostly time-based controls, not a guarantee that an answer is current.
+The caller owns the decision about how much staleness is acceptable for the
+consequence at hand.
 
 -----
 
@@ -87,8 +137,10 @@ contributions. Credit to Karpathy for the gates.
 The system has three layers, following Karpathy’s architecture.
 
 **Raw sources** are ingested documents — legislation, guidance, policy text,
-primary sources. They are stored immutably. The AI reads them but never modifies
-them. They are the source of truth.
+primary sources. They are stored immutably and never modified by the AI. But
+immutable means fixed, not authoritative: each is a point-in-time **snapshot** of an
+external system of record, and can be stale against upstream the moment it is fetched.
+The real source of truth stays upstream.
 
 **The wiki** is a directory of curated knowledge pages maintained by an AI
 librarian agent. Each page covers a specific concept or provision. Pages are
