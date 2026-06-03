@@ -6,7 +6,9 @@ import { randomUUID } from 'crypto'
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { getWikiContainer, getRawContainer, readBlob } from '../storage/blobs'
 import { readManifest } from '../storage/manifest'
+import { readRawManifest } from '../storage/raw-manifest'
 import { appendLog } from '../storage/log'
+import { computeSourceFreshness, computePageFreshness, SourceFreshness } from './freshness'
 import { ensureCollection, hybridQuery, QdrantHit } from '../storage/qdrant'
 import { embed } from '../embed/openai'
 import { chunkText } from '../embed/chunk'
@@ -211,6 +213,20 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   }
   const top = deduped.slice(0, topK)
 
+  // Cache-currency signal (Challenge B), independent of confidence. Map each curated
+  // result to the freshness of the snapshots it cites: stalest snapshot age, and whether
+  // a newer snapshot has superseded any of them. Computed from raw_manifest + the page's
+  // sources[]; only needed when wiki pages can appear in the results.
+  const wantWiki = scope === 'wiki' || scope === 'both'
+  const pageSources = new Map<string, string[]>()
+  let sourceFreshness = new Map<string, SourceFreshness>()
+  if (wantWiki) {
+    const { manifest } = await readManifest(libraryId)
+    for (const pg of manifest.pages) pageSources.set(pg.filename, pg.sources || [])
+    const { manifest: rawManifest } = await readRawManifest(libraryId)
+    sourceFreshness = computeSourceFreshness(rawManifest.sources)
+  }
+
   // Fetch content from blob storage for each result.
   const wiki = await getWikiContainer()
   const raw = await getRawContainer()
@@ -229,6 +245,7 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         confidence: p.confidence,
         status: p.status,
         domain: p.domain,
+        freshness: computePageFreshness(pageSources.get(p.filename) || [], sourceFreshness),
         score: h.score
       }
       results.push(result)

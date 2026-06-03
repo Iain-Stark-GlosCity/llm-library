@@ -5,9 +5,10 @@ import { DomainEnvelope, ToolDefinition, ok, toEnvelope } from '../types'
 import { getWikiContainer, readBlob, listBlobs } from '../storage/blobs'
 import { readManifest } from '../storage/manifest'
 import { readRawManifest } from '../storage/raw-manifest'
-import { listSchemaDomains } from '../storage/schema'
+import { listSchemaDomains, readSchema } from '../storage/schema'
 import { scrollPoints } from '../storage/qdrant'
 import { daysSince, inlineSourceIds } from './shared'
+import { computeSourceFreshness } from './freshness'
 
 interface LintIssue {
   type: string
@@ -261,6 +262,59 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
         severity: 'error',
         suggested_fix: 'Re-ingest the source via library_ingest, or remove the stale raw_manifest entry.'
       })
+    }
+  }
+
+  // Cache currency (Challenge B). Mechanically flag active pages built on stale
+  // snapshots: a cited snapshot that a newer ingest has superseded, a snapshot aged
+  // past a per-domain threshold, or a cited snapshot with no upstream identity (so
+  // supersession cannot be detected at all). Confidence and currency are independent —
+  // a high-confidence page can cite a superseded snapshot. The librarian decides
+  // whether to re-curate.
+  const freshness = computeSourceFreshness(rawManifest.sources)
+  const ageThreshold = new Map<string, number | undefined>()
+  for (const p of pages) {
+    if (p.status !== 'active') continue
+    if (!ageThreshold.has(p.domain)) {
+      const schema = await readSchema(p.domain).catch(() => null)
+      const raw = schema?.max_snapshot_age_days
+      ageThreshold.set(p.domain, typeof raw === 'number' && raw > 0 ? raw : undefined)
+    }
+    const threshold = ageThreshold.get(p.domain)
+    for (const sourceId of p.sources || []) {
+      const f = freshness.get(sourceId)
+      if (!f) continue // registered or unknown source: not a snapshot
+      if (f.superseded_by.length > 0) {
+        const newest = f.superseded_by[f.superseded_by.length - 1]
+        issues.push({
+          type: 'cites_superseded_source',
+          page: p.filename,
+          source_id: sourceId,
+          description: `cites snapshot "${sourceId}" but a newer snapshot "${newest}" of the same upstream exists`,
+          severity: 'warning',
+          suggested_fix: `Re-read ${newest} and update this page to cite it, or confirm the older snapshot is intentionally pinned.`
+        })
+      }
+      if (!f.groupable) {
+        issues.push({
+          type: 'source_missing_upstream_id',
+          page: p.filename,
+          source_id: sourceId,
+          description: `cited snapshot "${sourceId}" has no upstream identity (no upstream_id or source_url); supersession cannot be detected`,
+          severity: 'info',
+          suggested_fix: `Set an upstream identity with library_write (operation: set_provenance, source_id: ${sourceId}).`
+        })
+      }
+      if (threshold !== undefined && f.age_days > threshold) {
+        issues.push({
+          type: 'snapshot_aged',
+          page: p.filename,
+          source_id: sourceId,
+          description: `cited snapshot "${sourceId}" is ${f.age_days} days old (domain threshold ${threshold})`,
+          severity: 'info',
+          suggested_fix: 'Re-fetch and re-ingest the source, then update the page to cite the fresh snapshot.'
+        })
+      }
     }
   }
 

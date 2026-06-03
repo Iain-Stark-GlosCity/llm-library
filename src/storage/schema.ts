@@ -18,6 +18,9 @@ export interface DomainSchema {
   required_page_fields?: string[]
   page_type_allowlist?: string[]
   review_after_max_days?: Record<string, number>
+  // Snapshot age (days) past which library_lint flags cited snapshots as snapshot_aged
+  // for pages in this domain. Drives the offline staleness signal (Challenge B).
+  max_snapshot_age_days?: number
   maintenance_notes?: string
   audience?: string
   [key: string]: unknown

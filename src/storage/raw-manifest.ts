@@ -12,6 +12,10 @@ export interface SourceEntry {
   source_type: string
   domain: string
   source_url: string
+  // Stable identity of the upstream document this snapshot was captured from. Used to
+  // group snapshots for supersession detection (Challenge B). Optional: when absent,
+  // source_url is used as the grouping key, so existing entries need no migration.
+  upstream_id?: string
   created: string
   chunks_indexed: number
   embedding_status: 'ok' | 'failed'

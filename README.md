@@ -90,10 +90,17 @@ The two are independent axes.
 it is taken; a curated page is stale against its snapshot once the source is re-read
 and changes. The business consequence of answering from stale cache — a superseded
 regulation cited into a live procurement or planning decision — is the failure mode
-this design has to respect. `library_lint`, `review_after`, and the confidence grades
-are partial, mostly time-based controls, not a guarantee that an answer is current.
-The caller owns the decision about how much staleness is acceptable for the
-consequence at hand.
+this design has to respect. Because a re-ingested source lands under a new `source_id`
+(the id embeds the content hash) while older snapshots remain, the system can detect
+this mechanically: snapshots are grouped by `upstream_id` (falling back to `source_url`),
+`library_query` returns a freshness signal per result, and `library_lint` flags
+`cites_superseded_source`, `snapshot_aged`, and `source_missing_upstream_id`. This is
+offline detection — it sees that a newer snapshot exists once one has been ingested, and
+how old a snapshot is, but it cannot by itself know that upstream changed without a
+re-fetch. Existing content needs no migration: any source with a `source_url` groups
+automatically; for those without one, lint surfaces them and `set_provenance` assigns an
+identity. The caller still owns the decision about how much staleness is acceptable for
+the consequence at hand.
 
 -----
 
@@ -168,9 +175,9 @@ same capabilities are exposed through fewer top-level tools.
 |---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 |`library_ping` |Health check. No dependencies. Call first to confirm the transport is working before touching storage. Returns safe diagnostics for missing configuration without exposing secret values.                                                                                                                                                                                                                                                       |
 |`library_info` |Read-only inspection. `resource: instructions` returns the operating doctrine. `resource: schema` returns the per-domain schema (needs `domain`). `resource: pages` returns the curated catalogue (optional `domain`/`status` filter). `resource: page` returns one page by filename.                                                                                                                                                           |
-|`library_query`|Hybrid retrieval over curated wiki pages (default) or raw source chunks. Uses dense semantic search and sparse keyword search fused together, so exact terminology like regulation numbers and defined terms surface reliably alongside semantic matches. Returns confidence levels, source links, and a mechanical gap list.                                                                                                                   |
-|`library_write`|The only mutating tool (librarian mode only). Operations: `ingest` (store a raw source, chunk, embed), `register_source` (register a citable source by metadata without ingesting it), `update_page` (write or update a curated wiki page — the only path to the wiki), `update_schema` (write a per-domain schema), `deprecate_page` (soft-retire a page), `delete_blob` (hard-delete a stale object from storage, vector index, and registry).|
-|`library_lint` |Read-only mechanical health checks. Finds: orphan pages, pages missing source citations, open contradictions without resolution, broken cross-references, stale embeddings, unindexed sources, and manifest/blob drift. Does not interpret prose. Reports, does not fix.                                                                                                                                                                        |
+|`library_query`|Hybrid retrieval over curated wiki pages (default) or raw source chunks. Uses dense semantic search and sparse keyword search fused together, so exact terminology like regulation numbers and defined terms surface reliably alongside semantic matches. Returns confidence levels, source links, a mechanical gap list, and a per-result **freshness** signal (stalest cited snapshot age, whether a newer snapshot exists) — currency reported independently of confidence.                                                  |
+|`library_write`|The only mutating tool (librarian mode only). Operations: `ingest` (store a raw source, chunk, embed), `register_source` (register a citable source by metadata without ingesting it), `update_page` (write or update a curated wiki page — the only path to the wiki), `update_schema` (write a per-domain schema), `deprecate_page` (soft-retire a page), `delete_blob` (hard-delete a stale object from storage, vector index, and registry), `set_provenance` (assign `upstream_id`/`source_url` to an existing source so stale-cache detection can group its snapshots).|
+|`library_lint` |Read-only mechanical health checks. Finds: orphan pages, pages missing source citations, open contradictions without resolution, broken cross-references, stale embeddings, unindexed sources, manifest/blob drift, and **stale cache** — `cites_superseded_source` (a newer snapshot of the same upstream exists), `snapshot_aged` (older than a domain threshold), `source_missing_upstream_id` (no upstream identity to group by). Does not interpret prose. Reports, does not fix.                                          |
 
 -----
 

@@ -19,6 +19,7 @@ const inputSchema = {
     source_type: { type: 'string', enum: ['primary', 'secondary', 'derived'] },
     domain: { type: 'string' },
     source_url: { type: 'string' },
+    upstream_id: { type: 'string' },
     library_id: { type: 'string' }
   },
   required: ['source_id', 'title'],
@@ -42,6 +43,7 @@ async function registerSourceImpl(input: unknown): Promise<DomainEnvelope> {
   const sourceType: string = a.source_type ?? 'derived'
   const domain: string = typeof a.domain === 'string' ? a.domain : ''
   const sourceUrl: string = typeof a.source_url === 'string' ? a.source_url : ''
+  const upstreamId: string = typeof a.upstream_id === 'string' ? a.upstream_id : ''
   const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
 
   const warnings: string[] = []
@@ -62,6 +64,7 @@ async function registerSourceImpl(input: unknown): Promise<DomainEnvelope> {
     source_type: sourceType,
     domain,
     source_url: sourceUrl,
+    ...(upstreamId ? { upstream_id: upstreamId } : {}),
     created: existing?.created ?? new Date().toISOString(),
     chunks_indexed: 0,
     embedding_status: 'ok',
