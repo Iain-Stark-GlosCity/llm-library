@@ -14,6 +14,12 @@ on:
       - main
   workflow_dispatch:
 
+# Serialise deploys so a new run never collides with an in-flight deployment
+# (Kudu rejects concurrent deployments with a "pending operation" lock).
+concurrency:
+  group: deploy-func-stark-library
+  cancel-in-progress: false
+
 env:
   NODE_VERSION: '20.x' # match the Function App runtime (Node 20 LTS)
 
@@ -78,9 +84,31 @@ jobs:
           # Azure gateway returns 504 (~110s). isAsync=true returns 202 immediately with a
           # Location to poll, so we wait on the real deployment status instead of the gateway.
           $deployUri = "https://$scmHost/api/zipdeploy?isAsync=true"
-          Write-Host "Uploading app.zip to $deployUri"
-          $resp = Invoke-WebRequest -Uri $deployUri -Method POST -InFile 'app.zip' `
-            -ContentType 'application/zip' -Headers $headers -TimeoutSec 600
+          # Retry the upload if Kudu reports a pending/locked deployment (409 /
+          # "retry operation later") from an overlapping or still-finishing deploy.
+          $resp = $null
+          $maxAttempts = 6
+          for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+            try {
+              Write-Host "Upload attempt $attempt/$maxAttempts -> $deployUri"
+              $resp = Invoke-WebRequest -Uri $deployUri -Method POST -InFile 'app.zip' `
+                -ContentType 'application/zip' -Headers $headers -TimeoutSec 600
+              break
+            } catch {
+              $code = $null
+              try { $code = [int]$_.Exception.Response.StatusCode } catch {}
+              $msg = $_.Exception.Message
+              $locked = ($code -eq 409) -or ($msg -match 'pending') -or ($msg -match 'retry operation later')
+              if ($attempt -lt $maxAttempts -and $locked) {
+                $wait = 30 * $attempt
+                Write-Host "  deployment busy (HTTP $code). Waiting ${wait}s then retrying."
+                Start-Sleep -Seconds $wait
+                continue
+              }
+              throw
+            }
+          }
+          if (-not $resp) { throw 'Upload failed after retries' }
           Write-Host "Upload accepted: HTTP $($resp.StatusCode)"
 
           $pollUrl = $resp.Headers.Location
