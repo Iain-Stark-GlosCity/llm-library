@@ -262,6 +262,14 @@ highest-trust artifacts (the rule Constitution and the reasoning map) — key th
 expose them to agent consumers. Admin routes use flat `/api/mcp-*` paths because Azure
 Functions reserves the `/admin` namespace for its own host API.
 
+> ⚠️ **Key the admin routes before production.** All four routes ship `authLevel:
+> 'anonymous'` at MVP. Deployed as-is, `/api/mcp-library`, `/api/mcp-rules`, and
+> `/api/mcp-rdf` are **public, unauthenticated mutation endpoints** (they can update and
+> delete existing pages, rules, and reasoning maps). Before the production app, switch the
+> admin routes to `authLevel: 'function'` (in `createMcpFunction`, `src/functions/mcp.ts`)
+> or front them with APIM / Easy Auth. Note the deploy workflow auto-publishes on push to
+> `main`, so do not merge to `main` until the admin routes are locked down.
+
 ```
 src/
   functions/mcp.ts     JSON-RPC dispatcher and tool routing
@@ -338,7 +346,12 @@ func azure functionapp publish <app-name>
 Compiled output ships from `dist/`. `.funcignore` excludes source TypeScript,
 `local.settings.json`, and tests from the deployment package.
 
-Endpoint: `POST https://<app-name>.azurewebsites.net/api/mcp`
+> ⚠️ Before deploying the production app, lock down the admin routes (`/api/mcp-library`,
+> `/api/mcp-rules`, `/api/mcp-rdf`) — see the warning under **Architecture → Operating
+> surfaces**. They are anonymous mutation endpoints at MVP.
+
+Endpoints: consumption `POST https://<app-name>.azurewebsites.net/api/mcp`; admin
+`/api/mcp-library`, `/api/mcp-rules`, `/api/mcp-rdf`.
 
 If Azure reports `AZFD0005` with `node exited with code 1`, run
 `npm run smoke:entrypoint` locally first. This rebuilds TypeScript and loads every
