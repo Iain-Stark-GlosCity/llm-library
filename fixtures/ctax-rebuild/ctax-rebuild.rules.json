@@ -1,0 +1,38 @@
+{
+  "domain": "ctax-rebuild",
+  "version": "2026-06-05.1",
+  "input_schema": {
+    "type": "object",
+    "required": ["liable_occupier"],
+    "properties": {
+      "liable_occupier": { "type": "boolean" },
+      "low_income": { "type": "boolean" },
+      "in_arrears": { "type": "boolean" }
+    }
+  },
+  "rules": [
+    {
+      "id": "CTR-002",
+      "description": "Not the liable council-tax occupier: council-tax-rebuild support does not apply.",
+      "when": { "op": "eq", "path": "liable_occupier", "value": false },
+      "outcome": { "eligibility": "ineligible", "reason_code": "not_liable" }
+    },
+    {
+      "id": "CTR-001",
+      "description": "Liable, low income, and in arrears: qualifies for rebuild support.",
+      "when": {
+        "all": [
+          { "op": "eq", "path": "liable_occupier", "value": true },
+          { "op": "eq", "path": "low_income", "value": true },
+          { "op": "eq", "path": "in_arrears", "value": true }
+        ]
+      },
+      "outcome": {
+        "eligibility": "eligible",
+        "reason_code": "ctr_income_qualified",
+        "governs": ["RebuildSupportShape"]
+      }
+    }
+  ],
+  "default_outcome": { "eligibility": "indeterminate", "reason_code": "no_rule_fired" }
+}

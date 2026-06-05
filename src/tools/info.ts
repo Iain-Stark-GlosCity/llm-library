@@ -10,13 +10,19 @@ import { instructionsTool } from './instructions'
 import { getSchemaTool } from './get-schema'
 import { listPagesTool } from './list-pages'
 import { getPageTool } from './get-page'
+import { getRulesTool } from './get-rules'
+import { getReasoningTool } from './get-reasoning'
 
 // resource value → the underlying handler that fulfils it.
 const RESOURCES: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
   instructions: instructionsTool.handler,
   schema: getSchemaTool.handler,
   pages: listPagesTool.handler,
-  page: getPageTool.handler
+  page: getPageTool.handler,
+  // Layer 1 — Constitution. With `inputs`, resolves eligibility; without, returns the ruleset.
+  rules: getRulesTool.handler,
+  // Layer 3 — Reasoning Map. With `signals`, returns the governing answer shape; without, the Turtle.
+  reasoning: getReasoningTool.handler
 }
 
 const inputSchema = {
@@ -24,13 +30,15 @@ const inputSchema = {
   properties: {
     resource: {
       type: 'string',
-      enum: ['instructions', 'schema', 'pages', 'page'],
+      enum: ['instructions', 'schema', 'pages', 'page', 'rules', 'reasoning'],
       description:
         'Which read-only resource to fetch. "instructions": operating doctrine (no other ' +
         'input). "schema": per-domain schema (requires domain). "pages": curated catalogue ' +
-        '(optional domain/status filters). "page": a single page (requires filename).'
+        '(optional domain/status filters). "page": a single page (requires filename). ' +
+        '"rules": Layer 1 ruleset (requires domain; pass `inputs` to resolve eligibility). ' +
+        '"reasoning": Layer 3 Turtle map (requires domain; pass `signals` to get the answer shape).'
     },
-    domain: { type: 'string', description: 'Required for resource "schema"; optional filter for "pages".' },
+    domain: { type: 'string', description: 'Required for "schema"/"rules"/"reasoning"; optional filter for "pages".' },
     status: {
       type: 'string',
       enum: ['draft', 'active', 'deprecated'],
@@ -42,6 +50,10 @@ const inputSchema = {
       maxLength: 80,
       description: 'Required for resource "page".'
     },
+    inputs: { type: 'object', description: 'Structured facts for resource "rules" — resolves eligibility when present.' },
+    signals: { type: 'object', description: 'Active signals for resource "reasoning" — returns the answer shape when present.' },
+    intent: { type: 'string', description: 'Optional use mode for resource "reasoning".' },
+    eligibility: { type: 'string', description: 'Optional eligibility context for resource "reasoning".' },
     library_id: { type: 'string' }
   },
   required: ['resource'],
@@ -67,9 +79,10 @@ export const infoTool: ToolDefinition = {
   description:
     'Read-only library inspection. Set `resource` to choose what to fetch: "instructions" ' +
     '(operating doctrine — call first to self-orient), "schema" (per-domain schema; needs ' +
-    'domain), "pages" (curated catalogue; optional domain/status filters), or "page" (a single ' +
-    'page by filename). Consolidates the former instructions / get_schema / list_pages / ' +
-    'get_page tools.',
+    'domain), "pages" (curated catalogue; optional domain/status filters), "page" (a single ' +
+    'page by filename), "rules" (Layer 1 ruleset; needs domain, optional `inputs` to resolve ' +
+    'eligibility), or "reasoning" (Layer 3 Turtle map; needs domain, optional `signals` to get ' +
+    'the governing answer shape). Consolidates the read tools across all three layers.',
   inputSchema,
   handler: (input) => toEnvelope(() => infoImpl(input))
 }

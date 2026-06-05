@@ -12,11 +12,14 @@
     "watch": "tsc -w",
     "prestart": "npm run build",
     "start": "func start",
-    "smoke:entrypoint": "npm run build && node scripts/verify-functions-entrypoint.js"
+    "smoke:entrypoint": "npm run build && node scripts/verify-functions-entrypoint.js",
+    "verify:sovereign": "npm run build && node scripts/verify-sovereign.js"
   },
   "dependencies": {
     "@azure/functions": "^4.5.0",
     "@azure/storage-blob": "^12.24.0",
+    "n3": "^1.21.3",
+    "oxigraph": "^0.4.9",
     "uuid": "^9.0.1"
   },
   "devDependencies": {

@@ -6,6 +6,13 @@ export interface Config {
   rawContainer: string
   wikiContainer: string
   schemaContainer: string
+  // Layer 1 (Constitution) deterministic rulesets: {domain}.rules.json
+  rulesContainer: string
+  // Layer 3 (Reasoning Map) Turtle graphs: {domain}.ttl
+  rdfContainer: string
+  // Which in-process RDF engine to load: oxigraph (real SPARQL 1.1) or n3 (triple
+  // traversal fallback for when WASM cold-start cost is unwelcome).
+  rdfEngine: 'oxigraph' | 'n3'
   qdrantUrl: string
   qdrantApiKey: string | undefined
   qdrantCollection: string
@@ -20,6 +27,9 @@ export function getConfig(): Config {
     rawContainer: process.env.LIBRARY_RAW_CONTAINER || 'library-raw',
     wikiContainer: process.env.LIBRARY_WIKI_CONTAINER || 'library-wiki',
     schemaContainer: process.env.LIBRARY_SCHEMA_CONTAINER || 'library-schemas',
+    rulesContainer: process.env.LIBRARY_RULES_CONTAINER || 'library-rules',
+    rdfContainer: process.env.LIBRARY_RDF_CONTAINER || 'library-rdf',
+    rdfEngine: process.env.LIBRARY_RDF_ENGINE === 'n3' ? 'n3' : 'oxigraph',
     qdrantUrl: (process.env.QDRANT_URL || '').replace(/\/+$/, ''),
     qdrantApiKey: process.env.QDRANT_API_KEY || undefined,
     qdrantCollection: process.env.QDRANT_COLLECTION || 'library',
