@@ -8,6 +8,8 @@ import { DomainException } from '../types'
 let rawInit: Promise<ContainerClient> | null = null
 let wikiInit: Promise<ContainerClient> | null = null
 let schemaInit: Promise<ContainerClient> | null = null
+let rulesInit: Promise<ContainerClient> | null = null
+let rdfInit: Promise<ContainerClient> | null = null
 
 function serviceClient(): BlobServiceClient {
   const cfg = getConfig()
@@ -51,6 +53,28 @@ export function getSchemaContainer(): Promise<ContainerClient> {
     })
   }
   return schemaInit
+}
+
+// Layer 1 — Constitution. Holds {domain}.rules.json deterministic rulesets.
+export function getRulesContainer(): Promise<ContainerClient> {
+  if (!rulesInit) {
+    rulesInit = initContainer(getConfig().rulesContainer).catch((err) => {
+      rulesInit = null
+      throw err
+    })
+  }
+  return rulesInit
+}
+
+// Layer 3 — Reasoning Map. Holds {domain}.ttl Turtle graphs.
+export function getRdfContainer(): Promise<ContainerClient> {
+  if (!rdfInit) {
+    rdfInit = initContainer(getConfig().rdfContainer).catch((err) => {
+      rdfInit = null
+      throw err
+    })
+  }
+  return rdfInit
 }
 
 export interface BlobReadResult {

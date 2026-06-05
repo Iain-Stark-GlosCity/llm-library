@@ -243,10 +243,24 @@ alongside conceptual similarity matches.
 sessions, no streaming. Every request is self-contained, which suits the Azure
 Functions consumption plan where instances may scale to zero between calls.
 
-**Operating modes.** The server defaults to read-only agent mode. In read-only mode,
-`tools/list` exposes only `library_ping`, `library_info`, `library_query`, and
-`library_lint`. Set `LIBRARY_MCP_MODE=librarian` to expose `library_write` for
-editor workflows. Never run librarian mode in production agent deployments.
+**Operating surfaces (multiple MCP endpoints).** The app exposes one read-only
+**consumption** endpoint plus three per-layer **admin** endpoints, each a separate MCP
+server (its own `serverInfo.name`, its own function key in production). This is part of the
+three-layer "Sovereign AI" architecture — see [`docs/sovereign-architecture.md`](./docs/sovereign-architecture.md).
+
+| Route | serverInfo.name | Tools |
+|---|---|---|
+| `POST /api/mcp` | `library-consumption` | `library_ping`, `library_info`, `library_query`, `library_resolve`, `library_lint` |
+| `POST /api/mcp-library` | `library-admin` | `library_ping`, `library_info`, `library_write` (Layer 2) |
+| `POST /api/mcp-rules` | `rules-admin` | `library_ping`, `library_info`, `library_update_rules` (Layer 1) |
+| `POST /api/mcp-rdf` | `rdf-admin` | `library_ping`, `library_info`, `library_update_reasoning` (Layer 3) |
+
+`library_info` reads across all three layers (`resource: instructions | schema | pages |
+page | rules | reasoning`). `library_resolve` composes Layer 1 eligibility, Layer 2
+context, and Layer 3 answer-shape into one governed answer package. Admin routes mutate the
+highest-trust artifacts (the rule Constitution and the reasoning map) — key them and never
+expose them to agent consumers. Admin routes use flat `/api/mcp-*` paths because Azure
+Functions reserves the `/admin` namespace for its own host API.
 
 ```
 src/
@@ -274,9 +288,12 @@ Set these as Application settings on the Function App. Copy
 |`LIBRARY_RAW_CONTAINER`            |        |`library-raw`           |                                                    |
 |`LIBRARY_WIKI_CONTAINER`           |        |`library-wiki`          |                                                    |
 |`LIBRARY_SCHEMA_CONTAINER`         |        |`library-schemas`       |                                                    |
+|`LIBRARY_RULES_CONTAINER`          |        |`library-rules`         |Layer 1 deterministic rulesets (`{domain}.rules.json`).|
+|`LIBRARY_RDF_CONTAINER`            |        |`library-rdf`           |Layer 3 reasoning maps (`{domain}.ttl`).            |
+|`LIBRARY_RDF_ENGINE`               |        |`oxigraph`              |`oxigraph` (real SPARQL) or `n3` (triple-traversal fallback).|
 |`QDRANT_COLLECTION`                |        |`library`               |                                                    |
 |`EMBEDDING_MODEL`                  |        |`text-embedding-3-small`|                                                    |
-|`LIBRARY_MCP_MODE`                 |        |`read_only`             |Set `librarian` only for editor workflows.          |
+|`LIBRARY_MCP_MODE`                 |        |`read_only`             |Legacy health-report flag; surfaces are now route-based (see below).|
 
 The Qdrant `library` collection must already exist with the correct vector
 configuration before first use. The app verifies this on startup and errors clearly

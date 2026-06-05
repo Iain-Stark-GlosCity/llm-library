@@ -1,14 +1,20 @@
 // MCP transport: JSON-RPC 2.0 over a single HTTP POST, application/json response.
 // NOT SSE / not text/event-stream. Stateless — no session, no Mcp-Session-Id.
 // See CLAUDE.md "MCP transport contract" for the full contract.
+//
+// One HTTP function per tool SURFACE: a read-only consumption endpoint plus three per-bit
+// admin endpoints (Layer 2 library, Layer 1 rules, Layer 3 reasoning map). createMcpFunction
+// closes the shared dispatcher over a surface's tool list + serverInfo name, so each route
+// exposes only its own tools. Admin routes avoid the reserved Azure Functions /admin
+// namespace by using flat /api/mcp-* paths.
 
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from '@azure/functions'
 import { ToolDefinition } from '../types'
 import { pingTool } from '../tools/ping'
+import { SURFACES, SurfaceName } from '../tools/registry'
 import { diagnosticsWarnings, getRuntimeDiagnostics } from '../runtime-diagnostics'
 import { getConfig } from '../config'
 
-const SERVER_NAME = 'library-mcp'
 const SERVER_VERSION = '0.1.0'
 
 // Protocol versions we understand, newest first. We echo the client's requested
@@ -41,6 +47,14 @@ class RpcError extends Error {
   }
 }
 
+// Per-surface dispatch context: the serverInfo name advertised on initialize and the tool
+// map this endpoint exposes.
+interface Surface {
+  serverName: string
+  tools: ToolDefinition[]
+  toolMap: Map<string, ToolDefinition>
+}
+
 function jsonResponse(body: unknown, status = 200): HttpResponseInit {
   return {
     status,
@@ -60,11 +74,16 @@ function rpcError(id: JsonRpcId, code: number, message: string): HttpResponseIni
   return jsonResponse({ jsonrpc: '2.0', id, error: { code, message } })
 }
 
-function transportHealthResponse(): HttpResponseInit {
-  const diagnostics = getRuntimeDiagnostics(SERVER_NAME)
+function transportHealthResponse(surface: Surface): HttpResponseInit {
+  const diagnostics = getRuntimeDiagnostics(surface.serverName)
   return jsonResponse({
     ok: true,
-    data: { ...diagnostics, mcp_mode: getConfig().mcpMode },
+    data: {
+      ...diagnostics,
+      mcp_mode: getConfig().mcpMode,
+      surface: surface.serverName,
+      tools: surface.tools.map((t) => t.name)
+    },
     warnings: diagnosticsWarnings(diagnostics)
   })
 }
@@ -76,18 +95,16 @@ function emptyResponse(status: number): HttpResponseInit {
 // Accepted notification — no response body is sent (HTTP 202).
 const NO_RESPONSE = Symbol('no-response')
 
-async function getRegisteredTools(): Promise<ToolDefinition[]> {
-  const { TOOLS } = await import('../tools/registry')
-  return TOOLS
-}
-
-async function getRegisteredTool(name: string): Promise<ToolDefinition | undefined> {
+function lookupTool(surface: Surface, name: string): ToolDefinition | undefined {
   if (name === pingTool.name) return pingTool
-  const { TOOL_MAP } = await import('../tools/registry')
-  return TOOL_MAP.get(name)
+  return surface.toolMap.get(name)
 }
 
-async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promise<unknown | typeof NO_RESPONSE> {
+async function handleMethod(
+  surface: Surface,
+  req: JsonRpcRequest,
+  isNotification: boolean
+): Promise<unknown | typeof NO_RESPONSE> {
   switch (req.method) {
     case 'initialize': {
       const requested = req.params?.protocolVersion
@@ -98,7 +115,7 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
       return {
         protocolVersion,
         capabilities: { tools: {} },
-        serverInfo: { name: SERVER_NAME, version: SERVER_VERSION }
+        serverInfo: { name: surface.serverName, version: SERVER_VERSION }
       }
     }
 
@@ -112,7 +129,7 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
 
     case 'tools/list':
       return {
-        tools: (await getRegisteredTools()).map(({ name, description, inputSchema }) => ({
+        tools: surface.tools.map(({ name, description, inputSchema }) => ({
           name,
           description,
           inputSchema
@@ -132,7 +149,7 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
       if (args === null || typeof args !== 'object' || Array.isArray(args)) {
         throw new RpcError(INVALID_PARAMS, 'tools/call "arguments" must be an object when provided')
       }
-      const tool = await getRegisteredTool(name)
+      const tool = lookupTool(surface, name)
       if (!tool) {
         throw new RpcError(INVALID_PARAMS, `Unknown tool: ${name}`)
       }
@@ -150,12 +167,13 @@ async function handleMethod(req: JsonRpcRequest, isNotification: boolean): Promi
   }
 }
 
-export async function mcpHandler(
+async function dispatch(
+  surface: Surface,
   request: HttpRequest,
   context: InvocationContext
 ): Promise<HttpResponseInit> {
   if (request.method === 'GET') {
-    return transportHealthResponse()
+    return transportHealthResponse(surface)
   }
   if (request.method === 'HEAD') {
     return emptyResponse(200)
@@ -208,7 +226,7 @@ export async function mcpHandler(
   }
 
   try {
-    const result = await handleMethod(body as JsonRpcRequest, isNotification)
+    const result = await handleMethod(surface, body as JsonRpcRequest, isNotification)
     if (isNotification || result === NO_RESPONSE) {
       return { status: 202 }
     }
@@ -226,12 +244,35 @@ export async function mcpHandler(
   }
 }
 
-// authLevel 'anonymous' for MVP — MCP auth is deferred (function keys are a faff to
-// thread through MCP clients today). Put this behind a key / APIM / Easy Auth before
-// loading anything sensitive.
-app.http('mcp', {
-  methods: ['GET', 'HEAD', 'OPTIONS', 'POST'],
-  authLevel: 'anonymous',
-  route: 'mcp',
-  handler: mcpHandler
-})
+// Register one HTTP function for a named tool surface.
+function createMcpFunction(opts: {
+  functionName: string
+  route: string
+  serverName: string
+  surface: SurfaceName
+}): void {
+  const tools = SURFACES[opts.surface]
+  const surface: Surface = {
+    serverName: opts.serverName,
+    tools,
+    toolMap: new Map(tools.map((t) => [t.name, t]))
+  }
+  // authLevel 'anonymous' for MVP — MCP auth is deferred (function keys are a faff to
+  // thread through MCP clients today). Put each route behind a key / APIM / Easy Auth before
+  // loading anything sensitive — ADMIN routes especially: they mutate the Constitution
+  // (rules) and the reasoning map.
+  app.http(opts.functionName, {
+    methods: ['GET', 'HEAD', 'OPTIONS', 'POST'],
+    authLevel: 'anonymous',
+    route: opts.route,
+    handler: (request, context) => dispatch(surface, request, context)
+  })
+}
+
+// Consumption (read-only) — kept at /api/mcp for backward compatibility.
+createMcpFunction({ functionName: 'mcp', route: 'mcp', serverName: 'library-consumption', surface: 'consumption' })
+
+// Per-bit admin surfaces. Flat /api/mcp-* routes (NOT under /admin, which Azure reserves).
+createMcpFunction({ functionName: 'mcpLibraryAdmin', route: 'mcp-library', serverName: 'library-admin', surface: 'library-admin' })
+createMcpFunction({ functionName: 'mcpRulesAdmin', route: 'mcp-rules', serverName: 'rules-admin', surface: 'rules-admin' })
+createMcpFunction({ functionName: 'mcpRdfAdmin', route: 'mcp-rdf', serverName: 'rdf-admin', surface: 'rdf-admin' })

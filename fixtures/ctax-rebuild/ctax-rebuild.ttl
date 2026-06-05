@@ -1,0 +1,21 @@
+# Layer 3 — the ctax-rebuild reasoning map.
+# This is not a rule and not a fact. It is the SEMANTIC INTERSECTION that governs what
+# SHAPE of response is permissible when a bailiff-present signal meets the ctax-rebuild
+# domain. The Constitution (Layer 1) decides eligibility; this map decides the answer shape
+# and the hard safety constraints the LLM must honour.
+
+@prefix ctax: <https://stark.local/ctax#> .
+@prefix shape: <https://stark.local/shape#> .
+
+ctax:BailiffAtDoor a ctax:SemanticIntersection ;
+    ctax:inDomain "ctax-rebuild" ;
+    ctax:whenSignal "bailiff_present" ;
+    ctax:requiresAnswerShape shape:UrgentSafeguardingGuidance ;
+    ctax:hasSafetyConstraint "no_payment_instruction" ,
+                             "no_legal_advice_as_fact" ,
+                             "must_signpost_emergency_support" ;
+    ctax:mustInclude "right_to_request_breathing_space" ,
+                     "entry_rights_summary" ;
+    ctax:overrides ctax:StandardRebuildAnswerShape .
+
+shape:UrgentSafeguardingGuidance ctax:tone "calm_actionable" .

@@ -1,42 +1,51 @@
-// Tool registry. The transport layer (functions/mcp.ts) routes most tools/call
-// requests through TOOL_MAP. library_ping is intentionally also imported directly
-// by the transport so health checks stay dependency-light. Adding any other tool is
-// one entry here with zero transport changes.
+// Tool registry. The transport (functions/mcp.ts) registers one HTTP endpoint per named
+// surface and routes that endpoint's tools/call requests through the surface's tool map.
+// library_ping is also imported directly by the transport so health checks stay
+// dependency-light. Adding a tool is one entry on the relevant surface here.
 //
-// The surface is deliberately small: five role-shaped tools rather than a dozen
-// single-purpose ones. The reads (instructions/schema/pages/page) fold into
-// library_info via a `resource` sub-option, and the writes (ingest/register_source/
-// update_page/update_schema/deprecate_page) fold into library_write via an
-// `operation` sub-option. The underlying handlers are unchanged — see info.ts/write.ts.
+// Three-layer "Sovereign AI" topology: a single read-only CONSUMPTION surface, plus three
+// per-bit ADMIN surfaces (Layer 2 library, Layer 1 rules, Layer 3 reasoning map), each
+// separately routed and keyed. This generalises the former LIBRARY_MCP_MODE read/librarian
+// toggle: the mode is now the route, not an env flag.
 
 import { ToolDefinition } from '../types'
 import { pingTool } from './ping'
 import { infoTool } from './info'
 import { queryTool } from './query'
+import { resolveTool } from './resolve'
 import { writeTool } from './write'
 import { lintTool } from './lint'
-import { getConfig } from '../config'
+import { updateRulesTool } from './update-rules'
+import { updateReasoningTool } from './update-reasoning'
 
-// Ordered roughly by the librarian workflow: orient → read → retrieve → write → check.
-// Read-only mode exposes only safe query/retrieval/inspection tools. Set
-// LIBRARY_MCP_MODE=librarian to expose the mutating library_write tool.
-export const READ_ONLY_TOOLS: ToolDefinition[] = [
+// Read-only consumption: orient → read (all three layers, via library_info) → retrieve →
+// resolve a governed answer → check health. No mutation.
+export const CONSUMPTION_TOOLS: ToolDefinition[] = [
   pingTool,
   infoTool,
   queryTool,
+  resolveTool,
   lintTool
 ]
 
-export const LIBRARIAN_TOOLS: ToolDefinition[] = [
-  pingTool,
-  infoTool,
-  queryTool,
-  writeTool,
-  lintTool
-]
+// Layer 2 admin — the library write path (ingest/register/update_page/schema/etc.).
+export const LIBRARY_ADMIN_TOOLS: ToolDefinition[] = [pingTool, infoTool, writeTool]
 
-export const TOOLS: ToolDefinition[] = getConfig().mcpMode === 'librarian' ? LIBRARIAN_TOOLS : READ_ONLY_TOOLS
+// Layer 1 admin — the Constitution. Write deterministic rulesets.
+export const RULES_ADMIN_TOOLS: ToolDefinition[] = [pingTool, infoTool, updateRulesTool]
 
-export const TOOL_MAP: Map<string, ToolDefinition> = new Map(
-  TOOLS.map((t) => [t.name, t])
-)
+// Layer 3 admin — the Reasoning Map. Write Turtle maps.
+export const RDF_ADMIN_TOOLS: ToolDefinition[] = [pingTool, infoTool, updateReasoningTool]
+
+export type SurfaceName = 'consumption' | 'library-admin' | 'rules-admin' | 'rdf-admin'
+
+export const SURFACES: Record<SurfaceName, ToolDefinition[]> = {
+  consumption: CONSUMPTION_TOOLS,
+  'library-admin': LIBRARY_ADMIN_TOOLS,
+  'rules-admin': RULES_ADMIN_TOOLS,
+  'rdf-admin': RDF_ADMIN_TOOLS
+}
+
+// Backwards-compatible default surface (the consumption endpoint at /api/mcp).
+export const TOOLS: ToolDefinition[] = CONSUMPTION_TOOLS
+export const TOOL_MAP: Map<string, ToolDefinition> = new Map(TOOLS.map((t) => [t.name, t]))
