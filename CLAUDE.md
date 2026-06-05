@@ -133,6 +133,9 @@ LIBRARY_STORAGE_CONNECTION_STRING
 LIBRARY_RAW_CONTAINER              default: library-raw
 LIBRARY_WIKI_CONTAINER             default: library-wiki
 LIBRARY_SCHEMA_CONTAINER           default: library-schemas
+LIBRARY_RULES_CONTAINER            default: library-rules   (Layer 1 rulesets)
+LIBRARY_RDF_CONTAINER              default: library-rdf      (Layer 3 Turtle maps)
+LIBRARY_RDF_ENGINE                 default: oxigraph (real SPARQL) | n3 (fallback)
 QDRANT_URL                         — stark-library cluster endpoint URL
 QDRANT_API_KEY                     — stark-library cluster API key
 QDRANT_COLLECTION                  — collection name, default: library
@@ -421,9 +424,15 @@ it is **stateless** — no session, no `Mcp-Session-Id`. Every request is
 self-contained, which suits the Azure Functions consumption plan (instances are
 ephemeral and may scale to zero).
 
-**Single function.** One HTTP-trigger function `mcp`: `POST /api/mcp`,
-`authLevel: 'function'`. The caller supplies the function key via `?code=...` or the
-`x-functions-key` header. The MCP client stores the keyed URL. OAuth is out of scope
+**HTTP functions per surface.** The shared JSON-RPC dispatcher is factored into
+`createMcpFunction({ route, serverName, surface })` and registered once per tool surface
+(see the **Three-Layer Sovereign AI extension** section): the read-only consumption
+endpoint `POST /api/mcp` plus the per-layer admin endpoints `POST /api/mcp-library`,
+`POST /api/mcp-rules`, `POST /api/mcp-rdf`. (The original build targeted a single `mcp`
+function; the dispatcher is unchanged — it is now closed over a tool surface and called
+four times.) Each caller supplies the function key via `?code=...` or the
+`x-functions-key` header; the MCP client stores the keyed URL. Admin routes avoid the
+`/admin` segment, which Azure Functions reserves for its host API. OAuth is out of scope
 for MVP.
 
 **Two layers — keep them distinct.** This is the crux of the design:
@@ -865,6 +874,62 @@ active pages or the synthesis is stale.
 - `missing_synthesis` (warning) — a domain with 3+ active pages and no synthesis page.
 - `stale_synthesis` (info) — a synthesis page whose `review_after` date has passed.
 - `missing_schema` (info) — a domain with 5+ active pages and no schema file.
+
+-----
+
+## Three-Layer Sovereign AI extension (patch)
+
+This library is **Layer 2** of a three-layer architecture. Two new layers are added
+inside the same Azure Functions app, and the LLM is reduced to translation only. Full
+design + the CTax/bailiff walkthrough: `docs/sovereign-architecture.md`.
+
+|Layer|Job|Determinism|Storage|
+|-----|---|-----------|-------|
+|**1 — Constitution**|Eligibility, thresholds, valid states → governed outcome + which rule fired|Deterministic; no LLM/vectors|`library-rules` container, `{domain}.rules.json`|
+|**2 — Library**|Sourced context with confidence, currency, permitted-use (this doc)|Vector retrieval|`library-raw` / `library-wiki`|
+|**3 — Reasoning Map**|Question meaning, required answer **shape**, safety constraints, overrides|SPARQL over curated Turtle|`library-rdf` container, `{domain}.ttl`|
+|**LLM**|Translate the governed answer into language|Renders; decides nothing|—|
+
+### Layer 1 — rules / Constitution
+- `{domain}.rules.json`: `{ version, input_schema?, rules[], default_outcome }`. `rules` is
+  **ordered, first match wins**. Each rule: `{ id, description?, when, outcome }`.
+- `when` is a **closed predicate AST** (data, not code): `{ all|any: [...] }`, `{ not: ... }`,
+  or a leaf `{ op: eq|neq|lt|lte|gt|gte|in|exists, path: 'a.b', value? }` against the inputs.
+- `src/rules/resolve.ts` is **pure** (no I/O, LLM, vectors, network, randomness):
+  `resolveEligibility(ruleset, inputs)` → `{ eligibility, rule_fired, reason_code,
+  ruleset_version, governs }`. Malformed conditions fail closed (→ false).
+- Read/evaluate via `library_info` (`resource: rules`; pass `inputs` to resolve). Write via
+  `library_update_rules` (rules-admin endpoint).
+
+### Layer 3 — RDF reasoning map
+- `{domain}.ttl` Turtle is **canonical in blob**; the parsed graph is ephemeral (rebuilt per
+  cold start, cached by domain+ETag). No triple-store backend.
+- Engine-agnostic seam `src/rdf/engine.ts` (`load`/`query`/`quads`); `LIBRARY_RDF_ENGINE`
+  selects **oxigraph** (real SPARQL 1.1; default) or **n3** (triple-pattern traversal
+  fallback). Deps are `require()`'d lazily. `src/rdf/reason.ts` resolves a
+  `SemanticIntersection` (e.g. `ctax:BailiffAtDoor`) from the active signals →
+  `{ answer_shape, safety_constraints, must_include, must_not, overrides }`.
+- Read/traverse via `library_info` (`resource: reasoning`; pass `signals`). Write via
+  `library_update_reasoning` (rdf-admin endpoint; Turtle is parse-gated before storage).
+
+### Orchestration — `library_resolve`
+`{ domain, question, intent?, inputs?, signals? }` → runs **L1 (eligibility) → L2 (reuses
+`library_query`) → L3 (answer shape + safety)** and returns one package with a
+`translation_brief` (`allowed`, `answer_shape`, `safety_constraints`, `must_include`,
+`must_not`, `cite_sources`). The LLM renders to that brief and makes no governance call.
+
+### Surfaces (transport)
+Route-based surfaces in `src/tools/registry.ts`, one HTTP function each (see the
+**MCP transport contract**): `/api/mcp` (consumption: ping/info/query/resolve/lint),
+`/api/mcp-library` (`library_write`), `/api/mcp-rules` (`library_update_rules`),
+`/api/mcp-rdf` (`library_update_reasoning`). This supersedes `LIBRARY_MCP_MODE` (now only a
+health-report field).
+
+### New files
+`src/storage/rules.ts`, `src/rules/resolve.ts`, `src/rdf/{engine,engine.oxigraph,engine.n3,graph,reason}.ts`,
+`src/tools/{get-rules,update-rules,get-reasoning,update-reasoning,resolve}.ts`,
+fixtures in `fixtures/ctax-rebuild/`, and `scripts/verify-sovereign.js`
+(`npm run verify:sovereign` — pure checks of L1 firing and L3 reasoning under both engines).
 
 -----
 

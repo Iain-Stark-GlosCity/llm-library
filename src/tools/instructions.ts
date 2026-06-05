@@ -22,6 +22,14 @@ const DOCTRINE = {
     llm_library: 'Derived governed knowledge layer: source-linked, AI-consumable pages supporting interpretation, guidance, and analysis — a governed cache, not the record.'
   },
 
+  three_layer_model: {
+    note: 'This library is Layer 2 of a three-layer "Sovereign AI" stack. The layers do different jobs; the LLM only translates the governed result into language.',
+    layer_1_constitution: 'Deterministic rules — eligibility, thresholds, valid states. Given inputs it returns a governed outcome AND which rule fired (auditable). Resolved BEFORE the LLM. No LLM, no vectors. Stored as {domain}.rules.json; read/evaluated via library_info (resource: rules), written via library_update_rules.',
+    layer_2_library: 'This library: curated, sourced, versioned knowledge with confidence, currency (freshness), and permitted-use governance. Vector retrieval. Necessary but passive on its own.',
+    layer_3_reasoning_map: 'An RDF (Turtle) map of how concepts relate, what a question means, the required answer SHAPE, and the safety constraints (e.g. a "bailiff at the door" semantic intersection). Traversed via SPARQL. Stored as {domain}.ttl; read/traversed via library_info (resource: reasoning), written via library_update_reasoning.',
+    orchestration: 'library_resolve composes Layer 1 (eligibility) -> Layer 2 (sourced context) -> Layer 3 (answer shape + safety) into one governed package whose translation_brief tells the LLM exactly what to render and what it must not say. The LLM makes no eligibility, retrieval, or safety decision of its own.'
+  },
+
   authority_model: [
     'Raw source material is a point-in-time snapshot of an external system of record — evidence, not truth.',
     'Curated pages are governed interpretation: derived cache entries, not the record.',
@@ -31,7 +39,8 @@ const DOCTRINE = {
     'Contradictions should be represented, not smoothed away.',
     'Deprecated material should not be used by default.',
     'The library declares and warns on permitted use; it cannot enforce it. Operational actions (formal decisions, live account/payment/enforcement actions) belong to deterministic operational systems, never to cached knowledge.',
-    'Normal agents run in read-only mode; mutating tools require librarian/editor mode.'
+    'Eligibility is decided by Layer 1 (deterministic rules), not by the library and not by the LLM. The answer shape and hard safety constraints are decided by Layer 3 (the reasoning map). The library supplies sourced context only.',
+    'Surfaces are route-based: a read-only consumption endpoint plus per-layer admin endpoints. Mutating tools live only on their admin endpoint and must be separately keyed.'
   ],
 
   librarian_workflow: [
@@ -47,16 +56,25 @@ const DOCTRINE = {
   ],
 
   tool_roles: {
-    library_ping: 'Liveness check (dependency-light).',
+    library_ping: 'Liveness check (dependency-light). On every surface.',
     library_info:
-      'Read-only inspection. Pick a resource: "instructions" (this doctrine), "schema" ' +
-      '(per-domain schema layered on this doctrine), "pages" (curated catalogue from ' +
-      'manifest.json), "page" (a single curated page by filename).',
+      'Read-only inspection across all three layers. Pick a resource: "instructions" (this ' +
+      'doctrine), "schema" (per-domain advisory schema), "pages" (curated catalogue from ' +
+      'manifest.json), "page" (a single curated page by filename), "rules" (Layer 1 ruleset; ' +
+      'pass inputs to resolve eligibility), "reasoning" (Layer 3 Turtle map; pass signals to get ' +
+      'the governing answer shape).',
     library_query:
       'Hybrid retrieval over curated pages (default) and/or raw chunks. Requires domain ' +
       'by default; set allow_cross_domain only for deliberate discovery.',
+    library_resolve:
+      'The governed-answer orchestrator (consumption surface). Composes Layer 1 eligibility ' +
+      '(which rule fired) -> Layer 2 sourced context (reusing library_query) -> Layer 3 answer ' +
+      'shape + safety constraints, and returns a translation_brief (allowed, answer_shape, ' +
+      'safety_constraints, must_include/must_not, cite_sources) for an LLM to render. Inputs: ' +
+      'domain, question, optional intent (use mode), inputs (L1 facts), signals (e.g. ' +
+      '{ bailiff_present: true }).',
     library_write:
-      'The only mutating tool (librarian mode only). Pick an operation: "ingest" (store + ' +
+      'Layer 2 mutating tool (library-admin endpoint only). Pick an operation: "ingest" (store + ' +
       'chunk + embed raw source), "register_source" (register a citable source by metadata), ' +
       '"update_page" (the only curated wiki write path), "update_schema" (create/overwrite a ' +
       'per-domain schema), "deprecate_page" (soft-retire a page — preferred), "delete_blob" ' +
@@ -64,6 +82,13 @@ const DOCTRINE = {
       'manifest.json/raw_manifest.json; use only when soft-retirement is not enough, e.g. ' +
       'lint-flagged orphans or dead raw sources), "set_provenance" (assign upstream_id/source_url ' +
       'to an existing source so stale-cache supersession detection can group its snapshots).',
+    library_update_rules:
+      'Layer 1 write (rules-admin endpoint only). Create/overwrite a domain ruleset ' +
+      '({domain}.rules.json): ordered rules (first match wins) with a closed predicate `when` ' +
+      'and a governed outcome, plus version and default_outcome.',
+    library_update_reasoning:
+      'Layer 3 write (rdf-admin endpoint only). Create/overwrite a domain reasoning map ' +
+      '({domain}.ttl). The Turtle is parse-gated before it is stored.',
     library_lint: 'Mechanical health checks over the wiki.'
   },
 
@@ -115,7 +140,12 @@ const DOCTRINE = {
     'whether stale cache warrants re-ingesting the source and re-curating the page.',
 
   modes:
-    'Default LIBRARY_MCP_MODE is read_only, exposing only the read tools: library_ping, library_info, library_query, and library_lint. Set LIBRARY_MCP_MODE=librarian to additionally expose the mutating library_write tool (operations: ingest, register_source, update_page, update_schema, deprecate_page, delete_blob, set_provenance).'
+    'Surfaces are route-based (this supersedes the old LIBRARY_MCP_MODE read/librarian toggle, now only a health-report field). Four MCP endpoints, each its own server with its own key: ' +
+    'POST /api/mcp (consumption, read-only: library_ping, library_info, library_query, library_resolve, library_lint); ' +
+    'POST /api/mcp-library (library-admin: library_write); ' +
+    'POST /api/mcp-rules (rules-admin: library_update_rules); ' +
+    'POST /api/mcp-rdf (rdf-admin: library_update_reasoning). ' +
+    'Admin endpoints mutate the highest-trust artifacts (the rule Constitution and the reasoning map) — key them and never expose them to agent consumers. They use flat /api/mcp-* routes because Azure Functions reserves the /admin namespace.'
 }
 
 const inputSchema = {
