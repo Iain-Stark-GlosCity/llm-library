@@ -1,5 +1,10 @@
-# Docs for the Azure Web Apps Deploy action: https://github.com/azure/functions-action
-# More GitHub Actions for Azure: https://github.com/Azure/actions
+# Build and deploy to Azure Functions WITHOUT any third-party (Azure/*) action.
+# Fetching Azure/functions-action returns "Repository access blocked" in this
+# account, while GitHub-owned actions/* are allowed (the build job proves it). So
+# we use only actions/checkout + actions/setup-node, then deploy by POSTing a zip
+# to the Kudu zipdeploy endpoint with the existing publish-profile secret. Single
+# job on windows-latest because oxigraph is a native module and node_modules must
+# match the Windows Function App.
 
 name: Build and deploy Node.js project to Azure Function App - func-stark-library
 
@@ -10,15 +15,14 @@ on:
   workflow_dispatch:
 
 env:
-  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # set this to the path to your web app project, defaults to the repository root
   NODE_VERSION: '20.x' # match the Function App runtime (Node 20 LTS)
 
 jobs:
-  build:
+  build-and-deploy:
     runs-on: windows-latest
     permissions:
-      contents: read #This is required for actions/checkout
-      
+      contents: read # required for actions/checkout
+
     steps:
       - name: 'Checkout GitHub Action'
         uses: actions/checkout@v4
@@ -31,44 +35,47 @@ jobs:
       - name: 'Resolve Project Dependencies Using Npm'
         shell: pwsh
         run: |
-          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
           npm install
           npm run build --if-present
           npm run smoke:entrypoint
           npm run test --if-present
           npm prune --production
-          popd
 
       # Ship only the runtime artifact: compiled output, production node_modules,
-      # and the manifests the host needs. Excludes .git, src/, tests, and dev
-      # dependencies (typescript, azure-functions-core-tools) that bloat the zip.
-      - name: Upload artifact for deployment job
-        uses: actions/upload-artifact@v4
-        with:
-          name: node-app
-          path: |
-            dist
-            node_modules
-            host.json
-            package.json
-            package-lock.json
-            .funcignore
+      # and the manifests the host needs. 7-Zip is preinstalled on the runner and
+      # handles deep node_modules paths better than Compress-Archive.
+      - name: 'Package runtime artifact'
+        shell: pwsh
+        run: |
+          $items = @('dist','node_modules','host.json','package.json','package-lock.json','.funcignore') |
+            Where-Object { Test-Path $_ }
+          7z a -tzip app.zip @items | Out-Null
+          if (-not (Test-Path 'app.zip')) { throw 'app.zip was not created' }
+          "Packaged: $((Get-Item app.zip).Length) bytes" | Write-Host
 
-  deploy:
-    runs-on: windows-latest
-    needs: build
-    
-    steps:
-      - name: Download artifact from build job
-        uses: actions/download-artifact@v4
-        with:
-          name: node-app
-      
-      - name: 'Run Azure Functions Action'
-        uses: Azure/functions-action@v1
-        id: fa
-        with:
-          app-name: 'func-stark-library'
-          slot-name: 'Production'
-          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_F1D44B06BF634E9AADD8B80004C10EC7 }}
+      # Deploy via Kudu zipdeploy using the publish profile (no Azure/* action).
+      - name: 'Deploy to Azure Functions (Kudu zipdeploy)'
+        shell: pwsh
+        env:
+          PUBLISH_PROFILE: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE_F1D44B06BF634E9AADD8B80004C10EC7 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          [xml]$pp = $env:PUBLISH_PROFILE
+          $profile = $pp.publishData.publishProfile |
+            Where-Object { $_.publishMethod -eq 'ZipDeploy' } | Select-Object -First 1
+          if (-not $profile) {
+            $profile = $pp.publishData.publishProfile |
+              Where-Object { $_.publishMethod -eq 'MSDeploy' } | Select-Object -First 1
+          }
+          if (-not $profile) { throw 'No ZipDeploy/MSDeploy entry in publish profile' }
+
+          $scmHost = ($profile.publishUrl -replace '^https?://','') -replace '/.*$','' -replace ':\d+$',''
+          $uri = "https://$scmHost/api/zipdeploy"
+          $pair = "$($profile.userName):$($profile.userPWD)"
+          $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes($pair))
+
+          Write-Host "Deploying app.zip to $uri"
+          Invoke-RestMethod -Uri $uri -Method POST -InFile 'app.zip' `
+            -ContentType 'application/zip' `
+            -Headers @{ Authorization = "Basic $auth" } -TimeoutSec 600
+          Write-Host 'Deployment request completed.'
