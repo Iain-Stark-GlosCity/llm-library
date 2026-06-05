@@ -78,8 +78,15 @@ export function missingRequiredInputs(ruleset: RuleSet, inputs: unknown): string
   if (!schema || typeof schema !== 'object') return []
   const required = (schema as any).required
   if (!Array.isArray(required)) return []
-  const obj = (inputs ?? {}) as Record<string, unknown>
-  return required.filter((k) => typeof k === 'string' && (obj[k] === undefined || obj[k] === null))
+  // Resolve each required key with the same nested dotted-path traversal the evaluator
+  // uses (getPath), not a flat obj[k] lookup. Required keys like "property.occupancy_status"
+  // address nested inputs; a flat lookup falsely reports them missing even when the
+  // resolver reads them correctly and a rule fires.
+  return required.filter((k) => {
+    if (typeof k !== 'string') return false
+    const v = getPath(inputs ?? {}, k)
+    return v === undefined || v === null
+  })
 }
 
 // Resolve eligibility: walk rules in order, return on the FIRST match (order = priority).
