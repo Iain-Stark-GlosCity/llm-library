@@ -8,23 +8,48 @@
 
 import { LoadedGraph, RdfEngine, engineSupportsSparql, Triple } from './engine'
 
+// The engine ontology namespace. This is the SYSTEM vocabulary every domain reuses
+// verbatim — it is NOT domain-specific. The domain is carried as the string value of
+// sov:inDomain, never in the namespace. Only these IRIs are load-bearing; subject IRIs and
+// the objects of requiresAnswerShape/overrides are read by local name only (so the `shape:`
+// namespace is cosmetic), and constraint values are free literals.
+//
+// These are URNs, not URLs. An RDF IRI is an opaque identifier, never dereferenced — nothing
+// ever makes a network call to it — so a `urn:` scheme makes that explicit and removes any
+// reliance on a (resolvable or unresolvable) hostname. This matters in Azure: there is no host
+// to look up, no DNS, nothing "local". To rebind the vocabulary to an owned domain later,
+// change these constants and re-issue each {domain}.ttl.
 export const NS = {
-  ctax: 'https://stark.local/ctax#',
-  shape: 'https://stark.local/shape#',
+  sov: 'urn:sovereign:',
+  shape: 'urn:sovereign:shape:',
   rdf: 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
 }
 
 const P = {
   type: NS.rdf + 'type',
-  intersection: NS.ctax + 'SemanticIntersection',
-  inDomain: NS.ctax + 'inDomain',
-  whenSignal: NS.ctax + 'whenSignal',
-  requiresAnswerShape: NS.ctax + 'requiresAnswerShape',
-  hasSafetyConstraint: NS.ctax + 'hasSafetyConstraint',
-  mustInclude: NS.ctax + 'mustInclude',
-  mustNot: NS.ctax + 'mustNot',
-  overrides: NS.ctax + 'overrides'
+  intersection: NS.sov + 'SemanticIntersection',
+  inDomain: NS.sov + 'inDomain',
+  whenSignal: NS.sov + 'whenSignal',
+  requiresAnswerShape: NS.sov + 'requiresAnswerShape',
+  hasSafetyConstraint: NS.sov + 'hasSafetyConstraint',
+  mustInclude: NS.sov + 'mustInclude',
+  mustNot: NS.sov + 'mustNot',
+  overrides: NS.sov + 'overrides'
 }
+
+// The predicates the reasoner recognises (everything else in the ontology namespace is a
+// typo or unsupported). Exported so the write path can warn before a broken map is stored.
+export const KNOWN_PREDICATES: ReadonlySet<string> = new Set([
+  P.inDomain,
+  P.whenSignal,
+  P.requiresAnswerShape,
+  P.hasSafetyConstraint,
+  P.mustInclude,
+  P.mustNot,
+  P.overrides
+])
+// Predicates an intersection must declare to do anything useful.
+const REQUIRED_PREDICATES = [P.inDomain, P.whenSignal, P.requiresAnswerShape]
 
 export interface ReasoningInput {
   domain: string
@@ -42,11 +67,11 @@ export interface ReasoningResult {
   overrides: string[]
 }
 
-// Local name of an IRI (after the last '#' or '/'); pass literals through unchanged.
+// Local name of an IRI: the part after the last '#', '/', or ':'. The ':' case lets URN-style
+// IRIs (urn:sovereign:BailiffAtDoor) reduce to a clean token, while http(s) IRIs still cut at
+// their trailing '#'/'/'. Plain literals (no separator) pass through unchanged.
 function localName(value: string): string {
-  const hash = value.lastIndexOf('#')
-  const slash = value.lastIndexOf('/')
-  const cut = Math.max(hash, slash)
+  const cut = Math.max(value.lastIndexOf('#'), value.lastIndexOf('/'), value.lastIndexOf(':'))
   return cut >= 0 ? value.slice(cut + 1) : value
 }
 
@@ -104,11 +129,11 @@ async function reasonViaSparql(
   if (signals.length === 0) return emptyResult()
   const inList = signals.map((s) => JSON.stringify(s)).join(', ')
   const sparql = `
-    PREFIX ctax: <${NS.ctax}>
+    PREFIX sov: <${NS.sov}>
     SELECT ?intersection ?prop ?value WHERE {
-      ?intersection a ctax:SemanticIntersection ;
-                    ctax:inDomain ${JSON.stringify(domain)} ;
-                    ctax:whenSignal ?sig ;
+      ?intersection a sov:SemanticIntersection ;
+                    sov:inDomain ${JSON.stringify(domain)} ;
+                    sov:whenSignal ?sig ;
                     ?prop ?value .
       FILTER(?sig IN (${inList}))
     }`
@@ -158,4 +183,42 @@ export async function answerShapeFor(
     return reasonViaSparql(engine, graph, input.domain, signals)
   }
   return reasonViaQuads(engine, graph, input.domain, signals)
+}
+
+// Vocabulary guard for the write path. The Turtle parse-gate only checks SYNTAX; this checks
+// that the map uses the engine ontology the reasoner actually reads, so a structurally-valid
+// but semantically-dead map is flagged instead of silently contributing nothing. Returns
+// human-readable warning strings (never throws) — the caller decides whether to surface them.
+// Works under both engines via triple traversal (no SPARQL required).
+export async function checkVocabulary(engine: RdfEngine, graph: LoadedGraph): Promise<string[]> {
+  const warnings: string[] = []
+  const all = await engine.quads(graph, null, null, null)
+
+  // Predicates in the ontology namespace that the reasoner does not recognise (typos like
+  // sov:requireAnswerShape, or unsupported terms) — these are silently ignored at query time.
+  const unknown = new Set<string>()
+  for (const q of all) {
+    if (q.predicate.startsWith(NS.sov) && !KNOWN_PREDICATES.has(q.predicate)) {
+      unknown.add(q.predicate)
+    }
+  }
+  for (const u of unknown) warnings.push(`unknown_reasoning_predicate:${localName(u)}`)
+
+  // Intersection nodes typed in the ontology namespace.
+  const subjects = all
+    .filter((q) => q.predicate === P.type && q.object === P.intersection)
+    .map((q) => q.subject)
+  if (subjects.length === 0) {
+    // Either an empty map, or the class was written in the wrong namespace (e.g. ctax:/plan:).
+    warnings.push('no_semantic_intersection_found')
+  }
+  for (const subject of subjects) {
+    const props = all.filter((q) => q.subject === subject)
+    for (const required of REQUIRED_PREDICATES) {
+      if (!props.some((q) => q.predicate === required)) {
+        warnings.push(`intersection_missing_predicate:${localName(subject)}:${localName(required)}`)
+      }
+    }
+  }
+  return warnings
 }

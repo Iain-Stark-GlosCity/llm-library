@@ -18,7 +18,7 @@ const ruleset = JSON.parse(fs.readFileSync(path.join(FIX, 'ctax-rebuild.rules.js
 const turtle = fs.readFileSync(path.join(FIX, 'ctax-rebuild.ttl'), 'utf8')
 
 const { resolveEligibility } = require('../dist/src/rules/resolve')
-const { answerShapeFor } = require('../dist/src/rdf/reason')
+const { answerShapeFor, checkVocabulary } = require('../dist/src/rdf/reason')
 const { oxigraphEngine } = require('../dist/src/rdf/engine.oxigraph')
 const { n3Engine } = require('../dist/src/rdf/engine.n3')
 
@@ -39,7 +39,7 @@ async function main() {
     const r = resolveEligibility(ruleset, { liable_occupier: true, low_income: true, in_arrears: true })
     assert.strictEqual(r.eligibility, 'eligible')
     assert.strictEqual(r.rule_fired, 'CTR-001')
-    assert.deepStrictEqual(r.governs, ['ctax:RebuildSupportShape'])
+    assert.deepStrictEqual(r.governs, ['RebuildSupportShape'])
     assert.strictEqual(r.ruleset_version, '2026-06-05.1')
   })
   check('CTR-002 fires for not-liable', () => {
@@ -77,9 +77,42 @@ async function main() {
     check(`[${engine.name}] overrides StandardRebuildAnswerShape`, () => {
       assert.ok(reasoning.overrides.includes('StandardRebuildAnswerShape'), JSON.stringify(reasoning.overrides))
     })
-    check(`[${engine.name}] no signal → empty reasoning`, async () => {
-      const empty = await answerShapeFor(engine, graph, { domain: 'ctax-rebuild', signals: {} })
+    const empty = await answerShapeFor(engine, graph, { domain: 'ctax-rebuild', signals: {} })
+    check(`[${engine.name}] no signal → empty reasoning`, () => {
       assert.strictEqual(empty.matched_intersection, null)
+    })
+  }
+
+  console.log('Layer 3 — vocabulary guard (write-time)')
+  {
+    // Precompute warnings (async) so the assertions inside check() stay synchronous.
+    const goodWarnings = await checkVocabulary(n3Engine, await n3Engine.load(turtle))
+    const wrongNsWarnings = await checkVocabulary(
+      n3Engine,
+      await n3Engine.load('@prefix x: <urn:nope:> .\n x:Foo a x:SemanticIntersection ; x:inDomain "d" .')
+    )
+    const typoWarnings = await checkVocabulary(
+      n3Engine,
+      await n3Engine.load(
+        '@prefix sov: <urn:sovereign:> .\n' +
+          'sov:I a sov:SemanticIntersection ; sov:inDomain "d" ; sov:whenSignal "s" ; ' +
+          'sov:requireAnswerShape "x" .'
+      )
+    )
+    check('clean fixture map yields no vocabulary warnings', () => {
+      assert.deepStrictEqual(goodWarnings, [], JSON.stringify(goodWarnings))
+    })
+    check('wrong-namespace map flags no_semantic_intersection_found', () => {
+      assert.ok(wrongNsWarnings.includes('no_semantic_intersection_found'), JSON.stringify(wrongNsWarnings))
+    })
+    check('typo predicate flags unknown_reasoning_predicate', () => {
+      assert.ok(typoWarnings.includes('unknown_reasoning_predicate:requireAnswerShape'), JSON.stringify(typoWarnings))
+    })
+    check('missing required predicate is flagged', () => {
+      assert.ok(
+        typoWarnings.some((x) => x.startsWith('intersection_missing_predicate:I:requiresAnswerShape')),
+        JSON.stringify(typoWarnings)
+      )
     })
   }
 

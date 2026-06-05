@@ -30,7 +30,7 @@
       "outcome": {
         "eligibility": "eligible",
         "reason_code": "ctr_income_qualified",
-        "governs": ["ctax:RebuildSupportShape"]
+        "governs": ["RebuildSupportShape"]
       }
     }
   ],

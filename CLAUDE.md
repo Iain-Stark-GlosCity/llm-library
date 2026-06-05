@@ -907,10 +907,14 @@ design + the CTax/bailiff walkthrough: `docs/sovereign-architecture.md`.
 - Engine-agnostic seam `src/rdf/engine.ts` (`load`/`query`/`quads`); `LIBRARY_RDF_ENGINE`
   selects **oxigraph** (real SPARQL 1.1; default) or **n3** (triple-pattern traversal
   fallback). Deps are `require()`'d lazily. `src/rdf/reason.ts` resolves a
-  `SemanticIntersection` (e.g. `ctax:BailiffAtDoor`) from the active signals →
+  `SemanticIntersection` (e.g. `sov:BailiffAtDoor`) from the active signals →
   `{ answer_shape, safety_constraints, must_include, must_not, overrides }`.
+- Fixed engine ontology namespace `urn:sovereign:` (`sov:`) — the SAME for every domain (the
+  domain is the literal `sov:inDomain`), and a `urn:` so it is an opaque identifier with no
+  host to resolve (RDF IRIs are never dereferenced; nothing "local" at runtime).
 - Read/traverse via `library_info` (`resource: reasoning`; pass `signals`). Write via
-  `library_update_reasoning` (rdf-admin endpoint; Turtle is parse-gated before storage).
+  `library_update_reasoning` (rdf-admin endpoint; Turtle is parse-gated, plus a vocabulary
+  guard that warns on unknown ontology predicates / incomplete intersections).
 
 ### Orchestration — `library_resolve`
 `{ domain, question, intent?, inputs?, signals? }` → runs **L1 (eligibility) → L2 (reuses

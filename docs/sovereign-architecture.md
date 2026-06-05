@@ -99,11 +99,21 @@ front of every route, admin routes especially, before loading anything sensitive
   covered by `scripts/verify-sovereign.js`. Dependencies are `require()`'d lazily so a
   missing install surfaces as a clear runtime error rather than a load-time crash.
 - **What it encodes.** *Semantic intersections.* The bailiff case is modelled as
-  `ctax:BailiffAtDoor a ctax:SemanticIntersection` — not a rule, not a fact — that, when a
+  `sov:BailiffAtDoor a sov:SemanticIntersection` — not a rule, not a fact — that, when a
   `bailiff_present` signal meets the `ctax-rebuild` domain, `requiresAnswerShape`
   `shape:UrgentSafeguardingGuidance`, carries `hasSafetyConstraint` (e.g.
   `no_payment_instruction`), declares `mustInclude` content, and `overrides` the standard
   rebuild answer shape.
+- **Fixed ontology namespace.** The reasoner only reads a fixed set of predicate/class IRIs
+  under one namespace — `urn:sovereign:` (`sov:`). It is the **engine ontology, reused by
+  every domain**, not a per-domain or "ctax" vocabulary; the domain is the literal value of
+  `sov:inDomain`. It is a `urn:` precisely so it is an opaque identifier with no host to
+  resolve — there is nothing "local" to reference at runtime, in Azure or anywhere (RDF IRIs
+  are never dereferenced). Subject IRIs and answer-shape/override objects are read by local
+  name only, so `shape:` is cosmetic. Because predicates outside this set are silently
+  ignored at query time, `library_update_reasoning` runs a **vocabulary guard** that returns
+  `warnings[]` (it does not block) for unknown ontology predicates or intersections missing
+  `inDomain` / `whenSignal` / `requiresAnswerShape`.
 
 ## Orchestration — `library_resolve`
 
@@ -134,7 +144,7 @@ Question: *"A bailiff is at my door about council tax — what do I do?"* with
 1. **L1** fires `CTR-001` → `eligible` (`rule_fired: "CTR-001"`), decided before the LLM.
 2. **L2** returns the curated bailiff-rights page with provenance + freshness;
    `use_permitted: true` for `public_guidance`.
-3. **L3** matches `ctax:BailiffAtDoor` → `UrgentSafeguardingGuidance`, safety constraint
+3. **L3** matches `sov:BailiffAtDoor` → `UrgentSafeguardingGuidance`, safety constraint
    `no_payment_instruction`, `must_include: right_to_request_breathing_space`; it
    **overrides** the standard rebuild shape (this is urgent safeguarding, not an
    eligibility lecture).

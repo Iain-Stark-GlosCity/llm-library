@@ -3,19 +3,21 @@
 # SHAPE of response is permissible when a bailiff-present signal meets the ctax-rebuild
 # domain. The Constitution (Layer 1) decides eligibility; this map decides the answer shape
 # and the hard safety constraints the LLM must honour.
+#
+# The sov: vocabulary is the engine ontology — reused verbatim by EVERY domain. The domain is
+# the literal value of sov:inDomain, never the namespace. sov: is a URN: an opaque identifier
+# that is never dereferenced (no host, no DNS — nothing "local" at runtime).
 
-@prefix ctax: <https://stark.local/ctax#> .
-@prefix shape: <https://stark.local/shape#> .
+@prefix sov:   <urn:sovereign:> .
+@prefix shape: <urn:sovereign-shape:> .
 
-ctax:BailiffAtDoor a ctax:SemanticIntersection ;
-    ctax:inDomain "ctax-rebuild" ;
-    ctax:whenSignal "bailiff_present" ;
-    ctax:requiresAnswerShape shape:UrgentSafeguardingGuidance ;
-    ctax:hasSafetyConstraint "no_payment_instruction" ,
-                             "no_legal_advice_as_fact" ,
-                             "must_signpost_emergency_support" ;
-    ctax:mustInclude "right_to_request_breathing_space" ,
-                     "entry_rights_summary" ;
-    ctax:overrides ctax:StandardRebuildAnswerShape .
-
-shape:UrgentSafeguardingGuidance ctax:tone "calm_actionable" .
+sov:BailiffAtDoor a sov:SemanticIntersection ;
+    sov:inDomain "ctax-rebuild" ;
+    sov:whenSignal "bailiff_present" ;
+    sov:requiresAnswerShape shape:UrgentSafeguardingGuidance ;
+    sov:hasSafetyConstraint "no_payment_instruction" ,
+                            "no_legal_advice_as_fact" ,
+                            "must_signpost_emergency_support" ;
+    sov:mustInclude "right_to_request_breathing_space" ,
+                    "entry_rights_summary" ;
+    sov:overrides shape:StandardRebuildAnswerShape .

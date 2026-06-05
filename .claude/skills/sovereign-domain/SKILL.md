@@ -97,28 +97,36 @@ Set advisory doctrine and, if this domain should be governed, `governance_requir
 
 ### 3. Layer 3 — the reasoning map (`/api/mcp-rdf`)
 `library_update_reasoning { domain, turtle }`. The reasoner reads a **fixed predicate
-vocabulary** — use these exact IRIs (the `ctax:`/`shape:` prefixes are the engine's reserved
-ontology namespace, **not** domain-specific; reuse them for every domain and distinguish the
-domain via `ctax:inDomain`):
+vocabulary** — use these exact IRIs. The `sov:` prefix is the engine's **reserved ontology
+namespace**: it is the SAME for every domain (it is not "council tax" or any other domain),
+and the domain is carried as the literal value of `sov:inDomain`, never in the namespace. It
+is a `urn:` — an opaque identifier that is never dereferenced (no host, no DNS, nothing
+"local" at runtime). The `shape:` prefix is cosmetic — only the local name after the last
+`:` / `#` / `/` is read, so any namespace works for answer-shape and override objects.
 
 ```turtle
-@prefix ctax:  <https://stark.local/ctax#> .
-@prefix shape: <https://stark.local/shape#> .
+@prefix sov:   <urn:sovereign:> .
+@prefix shape: <urn:sovereign-shape:> .
 
-ctax:BailiffAtDoor a ctax:SemanticIntersection ;
-    ctax:inDomain "ctax-rebuild" ;                     # MUST equal the domain slug
-    ctax:whenSignal "bailiff_present" ;                # MUST equal a caller signal key
-    ctax:requiresAnswerShape shape:UrgentSafeguardingGuidance ;
-    ctax:hasSafetyConstraint "no_payment_instruction" , "must_signpost_emergency_support" ;
-    ctax:mustInclude "right_to_request_breathing_space" ;
-    ctax:mustNot "instruct_payment" ;
-    ctax:overrides ctax:StandardRebuildAnswerShape .
+sov:BailiffAtDoor a sov:SemanticIntersection ;
+    sov:inDomain "ctax-rebuild" ;                     # MUST equal the domain slug (literal)
+    sov:whenSignal "bailiff_present" ;                # MUST equal a caller signal key (literal)
+    sov:requiresAnswerShape shape:UrgentSafeguardingGuidance ;
+    sov:hasSafetyConstraint "no_payment_instruction" , "must_signpost_emergency_support" ;
+    sov:mustInclude "right_to_request_breathing_space" ;
+    sov:mustNot "instruct_payment" ;
+    sov:overrides shape:StandardRebuildAnswerShape .
 ```
 
-- A `SemanticIntersection` fires when its `ctax:inDomain` matches **and** any `ctax:whenSignal`
+- A `SemanticIntersection` fires when its `sov:inDomain` matches **and** any `sov:whenSignal`
   is active. It then sets `answer_shape`, `safety_constraints`, `must_include`, `must_not`,
   and `overrides`.
-- The Turtle is **parse-gated** on write — a syntax error is rejected before it lands.
+- The Turtle is **parse-gated** on write (syntax errors are rejected), and a **vocabulary
+  guard** additionally returns warnings (it does not block) when the map uses unrecognised
+  ontology predicates or a `SemanticIntersection` is missing `inDomain` / `whenSignal` /
+  `requiresAnswerShape` — read `warnings[]` on the write result.
+- Keep decorative annotations OUT of the `sov:` namespace, or the guard flags them as
+  unknown predicates.
 - **Verify**: `library_info { resource: reasoning, domain, signals: {...} }` returns the
   expected `answer_shape` and `safety_constraints`.
 
@@ -159,8 +167,9 @@ everything in `must_not`/`safety_constraints`, cites `cite_sources` — and judg
 
 - **Vocabulary drift** — a signal named `bailiff_present` in Turtle but `bailiffPresent` in the
   caller never fires. Keep snake_case and one spelling.
-- **Wrong RDF predicates** — only the `https://stark.local/ctax#` predicate IRIs above are read.
-  A custom predicate is silently ignored.
+- **Wrong RDF predicates / namespace** — only the `urn:sovereign:` predicate IRIs above are
+  read; a custom predicate or the wrong namespace produces no reasoning. The write-time
+  vocabulary guard now warns about this, but it does not block — check `warnings[]`.
 - **Rule order** — rules are first-match-wins; a broad rule placed first shadows specific ones.
 - **Confidence ≠ currency** — a high-confidence page can cite a superseded snapshot; resolve
   will down-rank/refuse it for higher intents. Set `last_source_check`/provenance deliberately.

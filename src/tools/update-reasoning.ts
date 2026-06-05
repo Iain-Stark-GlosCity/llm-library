@@ -5,6 +5,7 @@
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { getRdfContainer, writeBlob } from '../storage/blobs'
 import { getEngine } from '../rdf/engine'
+import { checkVocabulary } from '../rdf/reason'
 import { appendLog } from '../storage/log'
 
 const DOMAIN_RE = /^[a-z0-9][a-z0-9-]*$/
@@ -32,9 +33,15 @@ async function updateReasoningImpl(input: unknown): Promise<DomainEnvelope> {
 
   // Parse-gate: load() throws VALIDATION_ERROR on malformed Turtle before we persist.
   const engine = await getEngine()
-  await engine.load(turtle)
+  const graph = await engine.load(turtle)
 
   const warnings: string[] = []
+  // Vocabulary guard: the parse-gate only checks syntax. This warns (does not block) when the
+  // map uses predicates the reasoner does not read — e.g. the wrong namespace or a typo —
+  // which would otherwise write cleanly and then contribute nothing at query time.
+  const vocab = await checkVocabulary(engine, graph)
+  for (const w of vocab) warnings.push(w)
+
   const container = await getRdfContainer()
   await writeBlob(container, `${domain}.ttl`, turtle, 'text/turtle; charset=utf-8')
 
