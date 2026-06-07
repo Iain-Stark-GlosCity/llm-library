@@ -170,6 +170,13 @@ The cross-references are already there. The confidence levels are already assess
 The gaps are already flagged. The agent does not have to reconstruct any of this
 from scratch.
 
+Those three parts are the **library itself** — Layer 2 of a wider four-part
+architecture. Beside it sit two deterministic governing layers — a **Constitution**
+of rules and an **RDF reasoning map** — plus a translation-only LLM. They are what turn
+*declared* governance into *hard gates*; see
+[**The governing layers**](#the-governing-layers-deterministic-gates-around-the-model)
+below.
+
 -----
 
 ## The tools
@@ -181,8 +188,9 @@ same capabilities are exposed through fewer top-level tools.
 |Tool           |What it does                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 |---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 |`library_ping` |Health check. No dependencies. Call first to confirm the transport is working before touching storage. Returns safe diagnostics for missing configuration without exposing secret values.                                                                                                                                                                                                                                                       |
-|`library_info` |Read-only inspection. `resource: instructions` returns the operating doctrine. `resource: schema` returns the per-domain schema (needs `domain`). `resource: pages` returns the curated catalogue (optional `domain`/`status` filter). `resource: page` returns one page by filename.                                                                                                                                                           |
+|`library_info` |Read-only inspection. `resource: instructions` returns the operating doctrine. `resource: schema` returns the per-domain schema (needs `domain`). `resource: pages` returns the curated catalogue (optional `domain`/`status` filter). `resource: page` returns one page by filename. `resource: rules` returns the Layer 1 ruleset and, given `inputs`, resolves eligibility (which rule fired). `resource: reasoning` returns the Layer 3 map and, given `signals`, the governing answer shape.|
 |`library_query`|Hybrid retrieval over curated wiki pages (default) or raw source chunks (dense + sparse fused, so exact terminology like regulation numbers surfaces reliably). Each curated result is a **governed answer**: `confidence` (extraction quality), a **freshness** block (stalest cited snapshot age, whether a newer snapshot exists), and a **provenance** block (cited `source_id`s with `source_url`, `upstream_owner`, capture date, `upstream_status`; plus page review and permitted-use). Confidence and currency are independent. Optionally pass **`intended_use`** for a per-result `use_permitted` decision (increasing guard rails by mode); operational intents are refused and content withheld. Plus a mechanical gap list.|
+|`library_resolve`|Composes all layers for one question: **Layer 1** deterministic eligibility (which rule fired), **Layer 2** sourced context, **Layer 3** the required answer shape + safety constraints. Returns a `translation_brief` (`allowed`, `answer_shape`, `safety_constraints`, `must_include`, `must_not`, `cite_sources`) for an LLM to render — the model makes no governance decision. Pass `inputs` (Layer 1 facts) and `signals` (Layer 3 context). Consumption endpoint only.|
 |`library_write`|The only mutating tool (librarian mode only). Operations: `ingest`, `register_source`, `update_page` (the only path to the wiki; carries governance metadata — `allowed_use`/`prohibited_use`, `last_source_check`, `business_consequence_if_stale`, `invalidation_policy`), `update_schema`, `deprecate_page`, `delete_blob` (hard-delete blob + vector + registry entry), `set_provenance` (assign `upstream_id`/`source_url`/`upstream_owner` to an existing source).|
 |`library_lint` |Read-only mechanical health checks. Finds: orphan pages, missing citations, open contradictions, broken refs, stale embeddings, unindexed sources, manifest/blob drift; **stale cache** (`cites_superseded_source`, `snapshot_aged`, `source_missing_upstream_id`); and — for domains that set `governance_required` — **governance** (`operational_use_not_permitted`, `public_guidance_without_last_source_check`, `decision_support_without_stale_risk`, `high_risk_page_without_invalidation_policy`, `active_page_cites_unchecked_source`, `active_page_cites_stale_source`). Reports, does not fix.|
 
@@ -219,6 +227,103 @@ Governance is adopted **per domain**: the guard-rail lint checks only apply wher
 domain's schema sets `governance_required: true`. Existing domains stay quiet until they
 opt in — a controlled-pilot path, not a big-bang migration. None of this metadata lives
 in the vector index; it is stored in the manifests and enforced in the query/lint layer.
+
+-----
+
+## The governing layers: deterministic gates around the model
+
+Everything above is the **library** — derived knowledge with *soft* governance. It
+declares confidence, currency, and permitted use, and warns on misuse — but, as the
+previous section says, it "declares and warns … it cannot enforce." For domains where an
+answer drives a real decision, declaration is not enough: a fluent model can still talk
+its way past a warning. Two further layers sit beside the library and turn governance
+into **hard, deterministic gates the model cannot argue past.** Together with the library
+and a translation-only LLM they form a four-part "Sovereign AI" stack:
+
+| Layer | Job | Determinism | Storage |
+|---|---|---|---|
+| **1 — Constitution** (governance rules) | Eligibility, thresholds, valid states → a governed outcome and *which rule fired* | Deterministic; no LLM, no vectors | `library-rules`, `{domain}.rules.json` |
+| **2 — Library** | Sourced context with confidence, currency, permitted use (everything above) | Vector retrieval | `library-raw` / `library-wiki` |
+| **3 — Reasoning Map** (RDF) | What the question *means*, the required **answer shape**, safety constraints, overrides | SPARQL over curated Turtle | `library-rdf`, `{domain}.ttl` |
+| **LLM** | Translate the governed answer into language | Renders; decides nothing | — |
+
+The point of the split is to **reduce the LLM to translation.** It never decides
+eligibility, never decides whether an answer is safe to give, never picks the shape of
+the answer. Those are decided deterministically — before the model is invoked — and
+handed to it as constraints it cannot widen. The decision lives in version-controlled,
+auditable artifacts owned by the organisation, not in the model's generation.
+
+### Layer 1 — the Constitution (governance rules)
+
+A `{domain}.rules.json` is an **ordered, first-match-wins** list of rules. Each rule pairs
+a condition (`when`) over structured inputs with an `outcome`. The condition is a **closed
+predicate AST — data, not code**: `all` / `any` / `not` over leaf comparisons (`eq`,
+`neq`, `lt`, `lte`, `gt`, `gte`, `in`, `exists`) against dotted input paths. A **pure**
+resolver (`resolveEligibility` — no I/O, no network, no randomness) walks the rules in
+order and returns the **eligibility, the id of the rule that fired, a reason code, and the
+ruleset version** — every outcome auditable to a specific rule. Malformed conditions fail
+closed (never grant eligibility). (Distinct from the per-domain *library* schema
+`{domain}.schema.json`, which only configures Layer 2 governance metadata; the Constitution
+is its own `{domain}.rules.json`.)
+
+**The gate it closes: invented eligibility.** Whether someone qualifies for a discount,
+exemption, or threshold is not something to let an LLM reason about from prose — it has a
+legally correct answer that must be the same every time and traceable to the rule that
+produced it. Layer 1 answers it deterministically. If the inputs don't establish
+eligibility, the governed outcome is "ineligible / indeterminate," and no amount of fluent
+generation changes that. **Why it matters:** the load-bearing yes/no leaves the model
+entirely and becomes a pure function of facts and the Constitution — reproducible,
+testable, and explainable by rule id in an audit or appeal.
+
+**How it acts on context:** the gate is driven by the inputs. The same ruleset returns
+`owner_liable` for one set of facts and `single_person_discount` for another, naming the
+exact rule each time; add a fact and a different rule fires. Same Constitution, different
+facts, different governed outcome — predictably.
+
+### Layer 3 — the Reasoning Map (RDF)
+
+A `{domain}.ttl` Turtle graph is the **canonical** reasoning map (parsed into an ephemeral
+graph per cold start — no triple-store backend; canonical bytes live in blob). Given the
+**active context signals** of a question, a SPARQL traversal resolves a *semantic
+intersection* and returns the **shape the answer must take**: `answer_shape`,
+`safety_constraints`, `must_include`, `must_not`, and `overrides`. The engine is
+swappable — `oxigraph` (real SPARQL 1.1) or an `n3` triple-traversal fallback — both
+producing the same result.
+
+**The gate it closes: unsafe or wrong-shaped answers.** Some contexts must change *how*
+you answer regardless of the underlying facts. If a bailiff is at the door, the answer
+shape becomes urgent safeguarding guidance; `must_not` includes giving a payment
+instruction; `must_include` carries the right to request breathing space — and this
+**overrides** the ordinary answer shape. Encoding that as data means the constraint is
+applied deterministically, not left to the model to remember under pressure. **Why it
+matters:** the safety envelope of an answer — what it must contain, what it must never
+say, what overrides everything else — is governed centrally and cannot be eroded by
+phrasing, jailbreak, or a confidently wrong generation.
+
+**How it acts on context:** the gate is driven by the signals. A routine query and a
+vulnerable-caller or bailiff-present query over the *same* eligibility can resolve to
+different answer shapes, different safety constraints, and different overrides. Context —
+not the model's mood — selects which gate closes.
+
+### How they compose — `library_resolve`
+
+`library_resolve` runs all three in order: **L1 eligibility → L2 context → L3 answer shape
++ safety**, returning a single package with a **`translation_brief`** (`allowed`,
+`answer_shape`, `safety_constraints`, `must_include`, `must_not`, `cite_sources`). The LLM
+renders prose to that brief and makes no governance call. The layers are adopted **per
+domain** and degrade gracefully: a domain with no ruleset resolves eligibility as
+`indeterminate`; one with no map returns an empty answer shape — and you fall back to
+Layer 2 context alone. Nothing forces a domain to adopt all three at once.
+
+The whole arrangement puts the **organisation's rules and safety constraints, not the
+model, in charge of the decision.** Layer 2 can tell you a cached page is stale or not
+permitted for operational use, but it cannot stop a model acting on it. Layers 1 and 3
+move the decisions that carry consequence — *are they eligible* and *is this answer safe
+and correctly shaped* — out of the model and into deterministic, auditable, version-
+controlled artifacts. The model becomes a translator of a governed answer: the only role
+it can play safely where the answer has consequences. Full design and a worked
+council-tax / bailiff walkthrough:
+[`docs/sovereign-architecture.md`](./docs/sovereign-architecture.md).
 
 -----
 
