@@ -33,14 +33,6 @@ function inferUpstreamId(sourceUrl: string): string | null {
   return null
 }
 
-export async function migrateGovernanceDefaults(domain: string, dryRun = true): Promise<DomainEnvelope> {
-  return migrateGovernanceImpl({ domain, dry_run: dryRun })
-}
-
-export async function migratePageRoles(domain: string): Promise<DomainEnvelope> {
-  return migrateGovernanceImpl({ domain, dry_run: true })
-}
-
 async function migrateGovernanceImpl(input: unknown): Promise<DomainEnvelope> {
   const a = (input ?? {}) as Record<string, any>
   if (typeof a.domain !== 'string' || !a.domain) throw new DomainException('VALIDATION_ERROR', 'domain is required')
