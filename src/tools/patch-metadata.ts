@@ -20,7 +20,7 @@ import { appendLog } from '../storage/log'
 import { ensureCollection, setPayload } from '../storage/qdrant'
 import { wikiPagePointId } from '../embed/ids'
 import { renderFrontmatter, stripFrontmatter } from './shared'
-import { isUseMode, isOperationalUse } from './governance'
+import { isUseMode, isOperationalUse, isPageRole, PAGE_ROLES } from './governance'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
 
@@ -29,6 +29,7 @@ const PATCHABLE = [
   'reviewed_by',
   'reviewed_at',
   'review_after',
+  'page_role',
   'last_source_check',
   'allowed_use',
   'prohibited_use',
@@ -43,6 +44,7 @@ const inputSchema = {
     reviewed_by: { type: 'string', maxLength: 120 },
     reviewed_at: { type: 'string' },
     review_after: { type: 'string' },
+    page_role: { type: 'string', enum: [...PAGE_ROLES] },
     last_source_check: { type: 'string' },
     allowed_use: { type: 'array', items: { type: 'string' } },
     prohibited_use: { type: 'array', items: { type: 'string' } },
@@ -90,6 +92,8 @@ async function patchMetadataImpl(input: unknown): Promise<DomainEnvelope> {
   const reviewedBy = a.reviewed_by !== undefined ? (typeof a.reviewed_by === 'string' ? a.reviewed_by : (() => { throw new DomainException('VALIDATION_ERROR', 'reviewed_by must be a string') })()) : undefined
   const reviewedAt = isoOrThrow(a.reviewed_at, 'reviewed_at')
   const reviewAfter = isoOrThrow(a.review_after, 'review_after')
+  const pageRole = a.page_role !== undefined ? (typeof a.page_role === 'string' ? a.page_role : (() => { throw new DomainException('VALIDATION_ERROR', 'page_role must be a string') })()) : undefined
+  if (pageRole !== undefined && pageRole !== '' && !isPageRole(pageRole)) throw new DomainException('VALIDATION_ERROR', `page_role must be one of: ${PAGE_ROLES.join(', ')}`)
   const lastSourceCheck = isoOrThrow(a.last_source_check, 'last_source_check')
   const allowedUse = stringArrayOrThrow(a.allowed_use, 'allowed_use')
   const prohibitedUse = stringArrayOrThrow(a.prohibited_use, 'prohibited_use')
@@ -145,6 +149,7 @@ async function patchMetadataImpl(input: unknown): Promise<DomainEnvelope> {
   setScalar('reviewed_by', reviewedBy)
   setScalar('reviewed_at', reviewedAt)
   setScalar('review_after', reviewAfter)
+  setScalar('page_role', pageRole)
   setScalar('last_source_check', lastSourceCheck)
   setArray('allowed_use', allowedUse)
   setArray('prohibited_use', prohibitedUse)
@@ -156,6 +161,7 @@ async function patchMetadataImpl(input: unknown): Promise<DomainEnvelope> {
   const frontmatter = renderFrontmatter({
     title: next.title,
     type: next.type,
+    page_role: next.page_role,
     domain: next.domain,
     confidence: next.confidence,
     status: next.status,

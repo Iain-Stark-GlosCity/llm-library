@@ -11,7 +11,7 @@
     "build": "tsc",
     "watch": "tsc -w",
     "prestart": "npm run build",
-    "start": "func start",
+    "start": "npx --yes azure-functions-core-tools@4 --javascript start",
     "smoke:entrypoint": "npm run build && node scripts/verify-functions-entrypoint.js",
     "verify:sovereign": "npm run build && node scripts/verify-sovereign.js"
   },
@@ -25,7 +25,6 @@
   "devDependencies": {
     "@types/node": "^20.14.0",
     "@types/uuid": "^9.0.8",
-    "azure-functions-core-tools": "^4.0.6280",
     "typescript": "~5.4.5"
   }
 }

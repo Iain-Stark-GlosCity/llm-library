@@ -13,6 +13,8 @@ import { getPageTool } from './get-page'
 import { getRulesTool } from './get-rules'
 import { getReasoningTool } from './get-reasoning'
 import { coverageTool } from './coverage'
+import { governanceInventoryTool } from './governance-inventory'
+import { toolVersionsTool } from './tool-versions'
 
 // resource value → the underlying handler that fulfils it.
 const RESOURCES: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
@@ -25,7 +27,9 @@ const RESOURCES: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
   // Layer 3 — Reasoning Map. With `signals`, returns the governing answer shape; without, the Turtle.
   reasoning: getReasoningTool.handler,
   // Cross-layer coverage inventory across all domains (no domain input).
-  domains: coverageTool.handler
+  domains: coverageTool.handler,
+  governance: governanceInventoryTool.handler,
+  tool_versions: toolVersionsTool.handler
 }
 
 const inputSchema = {
@@ -33,14 +37,14 @@ const inputSchema = {
   properties: {
     resource: {
       type: 'string',
-      enum: ['instructions', 'schema', 'pages', 'page', 'rules', 'reasoning', 'domains'],
+      enum: ['instructions', 'schema', 'pages', 'page', 'rules', 'reasoning', 'domains', 'governance', 'tool_versions'],
       description:
         'Which read-only resource to fetch. "instructions": operating doctrine (no other ' +
         'input). "schema": per-domain schema (requires domain). "pages": curated catalogue ' +
         '(optional domain/status filters). "page": a single page (requires filename). ' +
         '"rules": Layer 1 ruleset (requires domain; pass `inputs` to resolve eligibility). ' +
         '"reasoning": Layer 3 Turtle map (requires domain; pass `signals` to get the answer shape). ' +
-        '"domains": cross-layer coverage inventory across all domains (no other input).'
+        '"domains": cross-layer coverage inventory across all domains (no other input). "governance": domain governance inventory (requires domain). "tool_versions": exposed tool/schema version manifest.'
     },
     domain: { type: 'string', description: 'Required for "schema"/"rules"/"reasoning"; optional filter for "pages".' },
     status: {

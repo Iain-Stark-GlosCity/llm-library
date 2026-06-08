@@ -4,10 +4,26 @@ import { getWikiContainer, readBlob, conditionalWrite, WriteResult } from './blo
 
 const MANIFEST_BLOB = 'manifest.json'
 
+export type PageRole =
+  | 'statutory_extraction'
+  | 'local_policy'
+  | 'local_policy_placeholder'
+  | 'index'
+  | 'checklist'
+  | 'operational_model'
+  | 'validation_contract'
+  | 'synthesis'
+  | 'rule_slot'
+  | 'rule_family'
+  | 'compiler_grade_rule'
+  | 'contradiction'
+  | 'unknown'
+
 export interface PageEntry {
   filename: string
   title: string
   type: string
+  page_role?: PageRole
   domain: string
   confidence: string
   status: string
@@ -27,6 +43,10 @@ export interface PageEntry {
   last_source_check?: string
   business_consequence_if_stale?: string
   invalidation_policy?: string
+  governance_migrated_at?: string
+  governance_migrated_by?: string
+  governance_policy_version?: string
+  governance_role_inferred?: boolean
   created: string
   updated: string
   embedding_status: 'ok' | 'failed' | 'pending'

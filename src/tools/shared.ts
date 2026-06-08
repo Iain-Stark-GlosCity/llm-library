@@ -46,6 +46,7 @@ function yamlList(items: string[]): string {
 export interface FrontmatterInput {
   title: string
   type: string
+  page_role?: string
   domain: string
   confidence: string
   status: string
@@ -61,6 +62,10 @@ export interface FrontmatterInput {
   last_source_check?: string
   business_consequence_if_stale?: string
   invalidation_policy?: string
+  governance_migrated_at?: string
+  governance_migrated_by?: string
+  governance_policy_version?: string
+  governance_role_inferred?: boolean
   created: string
   updated: string
 }
@@ -69,6 +74,7 @@ export function renderFrontmatter(fm: FrontmatterInput): string {
   const lines = ['---']
   lines.push(`title: ${yamlScalar(fm.title)}`)
   lines.push(`type: ${fm.type}`)
+  if (fm.page_role) lines.push(`page_role: ${fm.page_role}`)
   lines.push(`domain: ${yamlScalar(fm.domain)}`)
   lines.push(`confidence: ${fm.confidence}`)
   lines.push(`status: ${fm.status}`)
@@ -84,6 +90,10 @@ export function renderFrontmatter(fm: FrontmatterInput): string {
   if (fm.last_source_check) lines.push(`last_source_check: ${fm.last_source_check}`)
   if (fm.business_consequence_if_stale) lines.push(`business_consequence_if_stale: ${fm.business_consequence_if_stale}`)
   if (fm.invalidation_policy) lines.push(`invalidation_policy: ${yamlScalar(fm.invalidation_policy)}`)
+  if (fm.governance_migrated_at) lines.push(`governance_migrated_at: ${fm.governance_migrated_at}`)
+  if (fm.governance_migrated_by) lines.push(`governance_migrated_by: ${yamlScalar(fm.governance_migrated_by)}`)
+  if (fm.governance_policy_version) lines.push(`governance_policy_version: ${yamlScalar(fm.governance_policy_version)}`)
+  if (fm.governance_role_inferred !== undefined) lines.push(`governance_role_inferred: ${fm.governance_role_inferred}`)
   lines.push(`created: ${fm.created}`)
   lines.push(`updated: ${fm.updated}`)
   lines.push('---')
