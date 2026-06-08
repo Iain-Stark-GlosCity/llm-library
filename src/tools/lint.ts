@@ -292,21 +292,23 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
     if (p.status !== 'active') continue
     const { maxAge: threshold, governanceRequired } = await schemaFor(p.domain)
 
-    // Governance guard rails (only for domains that have opted in via schema). Naturally
-    // self-gating where they key off declared use, but the opt-in keeps the whole layer
-    // quiet for domains that have not adopted it yet.
+    // Safety invariant — ALWAYS checked, regardless of governance adoption. A page may never
+    // authorise an operational mode; update_page rejects it at write time, so this only fires
+    // on legacy or hand-edited data, and it must not be hidden behind the opt-in.
+    const allowed = p.allowed_use || []
+    const operational = allowed.filter((u) => isOperationalUse(u))
+    if (operational.length > 0) {
+      issues.push({
+        type: 'operational_use_not_permitted',
+        page: p.filename,
+        description: `allowed_use includes operational mode(s) ${operational.join(', ')} — the library must not authorise operational actions`,
+        severity: 'error',
+        suggested_fix: 'Remove operational modes from allowed_use; operational actions belong to deterministic systems.'
+      })
+    }
+
+    // Remaining governance guard rails are opt-in per domain (schema.governance_required).
     if (governanceRequired) {
-      const allowed = p.allowed_use || []
-      const operational = allowed.filter((u) => isOperationalUse(u))
-      if (operational.length > 0) {
-        issues.push({
-          type: 'operational_use_not_permitted',
-          page: p.filename,
-          description: `allowed_use includes operational mode(s) ${operational.join(', ')} — the library must not authorise operational actions`,
-          severity: 'error',
-          suggested_fix: 'Remove operational modes from allowed_use; operational actions belong to deterministic systems.'
-        })
-      }
       if (allowed.includes('public_guidance') && !p.last_source_check) {
         issues.push({
           type: 'public_guidance_without_last_source_check',
@@ -411,6 +413,21 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
 
   for (const [domain, domainPages] of activeByDomain) {
     const synthesis = domainPages.filter((p) => p.type === 'synthesis')
+
+    // governance_not_adopted — the domain serves enough active pages to be consumed under a
+    // real intended_use, but has not opted into the governance layer. This matters because
+    // query-time use-gating runs regardless of opt-in: consumers can be refused (e.g.
+    // no_last_source_check) while lint shows nothing. Surfacing the adoption gap keeps the
+    // "enforcement on, detection off" state visible rather than silent.
+    if (domainPages.length >= 3 && !(await schemaFor(domain)).governanceRequired) {
+      issues.push({
+        type: 'governance_not_adopted',
+        domain,
+        description: `domain "${domain}" has ${domainPages.length} active pages but has not set governance_required; query use-gating still applies, so consumers may be refused without lint explaining why`,
+        severity: 'info',
+        suggested_fix: `Set governance_required: true (and max_snapshot_age_days) in ${domain}.schema.json to surface the per-page governance issues, then backfill the flagged metadata.`
+      })
+    }
 
     // missing_synthesis — 3+ active pages in a domain but no synthesis page.
     if (domainPages.length >= 3 && synthesis.length === 0) {

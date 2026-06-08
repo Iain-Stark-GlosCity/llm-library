@@ -5,8 +5,7 @@
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { writeRules, RuleSet } from '../storage/rules'
 import { appendLog } from '../storage/log'
-
-const DOMAIN_RE = /^[a-z0-9][a-z0-9-]*$/
+import { assertValidDomain } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -21,9 +20,7 @@ const inputSchema = {
 
 async function updateRulesImpl(input: unknown): Promise<DomainEnvelope> {
   const a = (input ?? {}) as Record<string, any>
-  if (typeof a.domain !== 'string' || a.domain.length > 80 || !DOMAIN_RE.test(a.domain)) {
-    throw new DomainException('VALIDATION_ERROR', 'domain must match ^[a-z0-9][a-z0-9-]*$ and be ≤80 chars')
-  }
+  assertValidDomain(a.domain)
   if (a.rules === null || typeof a.rules !== 'object' || Array.isArray(a.rules)) {
     throw new DomainException('VALIDATION_ERROR', 'rules must be a JSON object (the ruleset)')
   }
