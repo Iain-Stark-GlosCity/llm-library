@@ -279,6 +279,7 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
       allowed_use: entry?.allowed_use ?? [],
       prohibited_use: entry?.prohibited_use ?? [],
       business_consequence_if_stale: entry?.business_consequence_if_stale ?? null,
+      page_role: entry?.page_role ?? null,
       invalidation_policy: entry?.invalidation_policy ?? null,
       sources: citedIds.map((id) => {
         const s = sourceMeta.get(id)
@@ -325,6 +326,10 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
           prohibited_use: entry?.prohibited_use,
           last_source_check: entry?.last_source_check ?? null,
           business_consequence_if_stale: entry?.business_consequence_if_stale ?? null,
+          invalidation_policy: entry?.invalidation_policy ?? null,
+          status: entry?.status ?? null,
+          page_role: entry?.page_role ?? null,
+          sources: (entry?.sources || []).map((id) => sourceMeta.get(id)).filter((s): s is SourceEntry => Boolean(s)),
           superseded: freshness.superseded
         })
         result.use_permitted = d.permitted

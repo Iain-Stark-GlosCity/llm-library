@@ -15,6 +15,7 @@ import { loadGraph } from '../rdf/graph'
 import { getEngine } from '../rdf/engine'
 import { answerShapeFor, ReasoningResult } from '../rdf/reason'
 import { queryTool } from './query'
+import { isOperationalUse } from './governance'
 
 const inputSchema = {
   type: 'object',
@@ -65,8 +66,9 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
     throw new DomainException('VALIDATION_ERROR', 'question is required')
   }
   const domain: string = a.domain
-  const intent = typeof a.intent === 'string' ? a.intent : undefined
-  const inputs = a.inputs && typeof a.inputs === 'object' && !Array.isArray(a.inputs) ? a.inputs : {}
+  const rawInputs = a.inputs && typeof a.inputs === 'object' && !Array.isArray(a.inputs) ? a.inputs : {}
+  const intent = typeof a.intent === 'string' ? a.intent : (typeof rawInputs.requested_use === 'string' ? rawInputs.requested_use : undefined)
+  const inputs = rawInputs
   const signals = a.signals && typeof a.signals === 'object' && !Array.isArray(a.signals) ? a.signals : {}
   const warnings: string[] = []
 
@@ -94,11 +96,28 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
     // A hard retrieval failure (validation/storage) — surface it as the resolve failure.
     return queryEnvelope
   }
-  const context = queryEnvelope.data as {
+  const queryContext = queryEnvelope.data as {
     results: any[]
     gaps: string[]
     query_id: string
     use_decision?: unknown
+  }
+  const allResults = queryContext.results || []
+  const usableResults = allResults.filter((r) => intent ? r.use_permitted === true : true)
+  const blockedResults = allResults.filter((r) => intent ? r.use_permitted !== true : false).map((r) => ({
+    ...r,
+    blocked_reason: Array.isArray(r.use_notes) && r.use_notes.length ? r.use_notes[0] : 'not_permitted_for_intent',
+    may_use_for: 'gap_identification_only',
+    must_not_use_for: intent ?? 'requested_intent'
+  }))
+  const context = {
+    usable_results: usableResults,
+    blocked_results: blockedResults,
+    all_results: allResults,
+    results: allResults,
+    gaps: queryContext.gaps,
+    query_id: queryContext.query_id,
+    ...(queryContext.use_decision ? { use_decision: queryContext.use_decision } : {})
   }
   for (const w of queryEnvelope.warnings) warnings.push(`query:${w}`)
 
@@ -126,13 +145,12 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
   // wants a hard default block sets an `ineligible` default_outcome instead.
   const eligibilityDetermined = eligibility.eligibility === 'eligible'
   const eligibilityBlocks = eligibility.eligibility === 'ineligible'
-  const permittedResults = (context.results || []).filter((r) =>
-    intent ? r.use_permitted === true : true
-  )
+  const permittedResults = context.usable_results
   const hasPermittedContext = permittedResults.length > 0
   // The map can hard-block by demanding a Refuse shape; otherwise it only shapes the answer.
   const reasoningBlocks = reasoning.answer_shape === 'Refuse'
-  const allowed = !eligibilityBlocks && hasPermittedContext && !reasoningBlocks
+  const operationalBlocks = Boolean(intent && isOperationalUse(intent))
+  const allowed = !operationalBlocks && !eligibilityBlocks && hasPermittedContext && !reasoningBlocks
 
   // Sources the LLM must cite: the provenance source_ids of the permitted curated results.
   const citeSources = Array.from(
@@ -145,19 +163,31 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
     )
   )
 
+  const answerScope = operationalBlocks || eligibilityBlocks || reasoningBlocks
+    ? 'refusal_only'
+    : eligibility.eligibility === 'indeterminate'
+      ? 'gap_or_uncertainty_explanation_only'
+      : blockedResults.length > 0 && usableResults.length === 0
+        ? 'gap_acknowledgement_only'
+        : 'answer_from_usable_context_only'
+
   const translationBrief = {
     allowed,
-    answer_shape: reasoning.answer_shape,
+    answer_scope: answerScope,
+    answer_shape: operationalBlocks || eligibilityBlocks ? 'Refuse' : (reasoning.answer_shape || (answerScope === 'gap_acknowledgement_only' ? 'GapAcknowledgementGuidance' : null)),
     safety_constraints: reasoning.safety_constraints,
     must_include: reasoning.must_include,
     must_not: reasoning.must_not,
     cite_sources: citeSources,
+    usable_context_only: true,
     note: allowed
       ? eligibilityDetermined
         ? 'Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
         : 'Layer 1 makes no eligibility determination for this domain; do not assert eligibility. Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
-      : eligibilityBlocks
-        ? 'Ineligible under Layer 1; do not assert eligibility. Explain the position and, if a shape is set, follow it.'
+      : operationalBlocks
+        ? 'Operational use refused. Do not use retrieved content as authority for formal/live/payment/enforcement action.'
+        : eligibilityBlocks
+          ? 'Ineligible under Layer 1; do not assert eligibility. Explain the position and, if a shape is set, follow it.'
         : !hasPermittedContext
           ? 'No permitted curated context for this intent; do not answer substantively.'
           : 'Reasoning map blocks a substantive answer for this intersection.'

@@ -16,6 +16,7 @@ import { deleteBlobTool } from './delete-blob'
 import { setProvenanceTool } from './set-provenance'
 import { patchMetadataTool } from './patch-metadata'
 import { markSourceCheckedTool } from './mark-source-checked'
+import { migrateGovernanceTool } from './migrate-governance'
 
 // operation value → the underlying handler that performs it.
 const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
@@ -27,7 +28,8 @@ const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = 
   deprecate_page: deprecatePageTool.handler,
   delete_blob: deleteBlobTool.handler,
   set_provenance: setProvenanceTool.handler,
-  mark_source_checked: markSourceCheckedTool.handler
+  mark_source_checked: markSourceCheckedTool.handler,
+  migrate_governance: migrateGovernanceTool.handler
 }
 
 // Union of every field used by the underlying operations. Per-operation requirements
@@ -38,7 +40,7 @@ const inputSchema = {
   properties: {
     operation: {
       type: 'string',
-      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked'],
+      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked', 'migrate_governance'],
       description:
         'Which write to perform. "ingest": store+chunk+embed a raw source (needs title, content, ' +
         'source_type). "register_source": register a citable source by metadata only (needs source_id, ' +
@@ -52,7 +54,7 @@ const inputSchema = {
         '(needs container, blob_path, reason) — the irreversible cleanup escape hatch. ' +
         '"set_provenance": set upstream_id/source_url on an existing source (needs source_id) for ' +
         'stale-cache supersession grouping. "mark_source_checked": record upstream revalidation ' +
-        'status on an existing source (needs source_id, upstream_status).'
+        'status on an existing source (needs source_id, upstream_status). "migrate_governance": dry-run or apply governed-domain metadata migration.'
     },
 
     // shared / ingest / register_source
@@ -68,6 +70,7 @@ const inputSchema = {
     // update_page
     filename: { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*\\.md$', maxLength: 80 },
     page_type: { type: 'string', enum: ['concept', 'source', 'synthesis', 'contradiction'] },
+    page_role: { type: 'string', enum: ['statutory_extraction', 'local_policy', 'local_policy_placeholder', 'index', 'checklist', 'operational_model', 'validation_contract', 'synthesis', 'rule_slot', 'rule_family', 'compiler_grade_rule', 'contradiction', 'unknown'] },
     confidence: { type: 'string', enum: ['high', 'medium', 'low', 'unverified'] },
     tags: { type: 'array', items: { type: 'string' }, maxItems: 10 },
     summary: { type: 'string', maxLength: 200 },
@@ -100,6 +103,9 @@ const inputSchema = {
     purge_vector: { type: 'boolean' },
     purge_manifest: { type: 'boolean' },
     force: { type: 'boolean' },
+    dry_run: { type: 'boolean' },
+    manual_accept_current: { type: 'boolean' },
+    migrated_by: { type: 'string' },
 
     library_id: { type: 'string' }
   },
