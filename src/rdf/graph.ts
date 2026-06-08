@@ -3,8 +3,19 @@
 // parsed once per cold start, reused across warm invocations, and invalidated when the
 // blob's ETag changes. Mirrors the *Init singleton idiom in storage/blobs.ts.
 
-import { getRdfContainer, readBlob } from '../storage/blobs'
+import { getRdfContainer, readBlob, listBlobs } from '../storage/blobs'
 import { getEngine, LoadedGraph } from './engine'
+
+// Domains that currently have a Turtle reasoning map (used by the coverage inventory).
+export async function listRdfDomains(): Promise<Set<string>> {
+  const container = await getRdfContainer()
+  const names = await listBlobs(container, '')
+  const domains = new Set<string>()
+  for (const n of names) {
+    if (n.endsWith('.ttl')) domains.add(n.slice(0, -'.ttl'.length))
+  }
+  return domains
+}
 
 interface CacheEntry {
   etag: string

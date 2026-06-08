@@ -2,9 +2,26 @@
 // generation (string template — no YAML lib, per CLAUDE.md), and content parsing.
 
 import { createHash } from 'crypto'
+import { DomainException } from '../types'
 
 export function sha256(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex')
+}
+
+// Canonical domain-slug shape, shared by every layer that keys storage by domain
+// ({domain}.rules.json, {domain}.schema.json, {domain}.ttl, and the wiki `domain` field).
+// Every artifact must agree on the exact string — a rules file under a mistyped domain
+// silently never fires — so all writers validate against this one definition.
+export const DOMAIN_RE = /^[a-z0-9][a-z0-9-]*$/
+
+export function assertValidDomain(domain: unknown): string {
+  if (typeof domain !== 'string' || domain.length === 0 || domain.length > 80 || !DOMAIN_RE.test(domain)) {
+    throw new DomainException(
+      'VALIDATION_ERROR',
+      'domain is required and must match ^[a-z0-9][a-z0-9-]*$ (lowercase, digits, hyphens) and be ≤80 chars'
+    )
+  }
+  return domain
 }
 
 export function slugify(title: string): string {

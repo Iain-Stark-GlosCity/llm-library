@@ -7,8 +7,7 @@ import { getRdfContainer, writeBlob } from '../storage/blobs'
 import { getEngine } from '../rdf/engine'
 import { checkVocabulary } from '../rdf/reason'
 import { appendLog } from '../storage/log'
-
-const DOMAIN_RE = /^[a-z0-9][a-z0-9-]*$/
+import { assertValidDomain } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -22,9 +21,7 @@ const inputSchema = {
 
 async function updateReasoningImpl(input: unknown): Promise<DomainEnvelope> {
   const a = (input ?? {}) as Record<string, any>
-  if (typeof a.domain !== 'string' || a.domain.length > 80 || !DOMAIN_RE.test(a.domain)) {
-    throw new DomainException('VALIDATION_ERROR', 'domain must match ^[a-z0-9][a-z0-9-]*$ and be ≤80 chars')
-  }
+  assertValidDomain(a.domain)
   if (typeof a.turtle !== 'string' || !a.turtle.trim()) {
     throw new DomainException('VALIDATION_ERROR', 'turtle (a Turtle document) is required')
   }

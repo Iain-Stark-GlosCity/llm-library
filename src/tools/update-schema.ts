@@ -4,9 +4,7 @@
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { writeSchema, DomainSchema } from '../storage/schema'
 import { appendLog } from '../storage/log'
-
-// Matches a domain slug used as a blob filename segment.
-const DOMAIN_RE = /^[a-z0-9][a-z0-9-]*$/
+import { assertValidDomain } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -20,9 +18,7 @@ const inputSchema = {
 
 async function updateSchemaImpl(input: unknown): Promise<DomainEnvelope> {
   const a = (input ?? {}) as Record<string, any>
-  if (typeof a.domain !== 'string' || a.domain.length > 80 || !DOMAIN_RE.test(a.domain)) {
-    throw new DomainException('VALIDATION_ERROR', 'domain must match ^[a-z0-9][a-z0-9-]*$ and be ≤80 chars')
-  }
+  assertValidDomain(a.domain)
   if (a.schema === null || typeof a.schema !== 'object' || Array.isArray(a.schema)) {
     throw new DomainException('VALIDATION_ERROR', 'schema must be a JSON object')
   }

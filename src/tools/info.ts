@@ -12,6 +12,7 @@ import { listPagesTool } from './list-pages'
 import { getPageTool } from './get-page'
 import { getRulesTool } from './get-rules'
 import { getReasoningTool } from './get-reasoning'
+import { coverageTool } from './coverage'
 
 // resource value → the underlying handler that fulfils it.
 const RESOURCES: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
@@ -22,7 +23,9 @@ const RESOURCES: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
   // Layer 1 — Constitution. With `inputs`, resolves eligibility; without, returns the ruleset.
   rules: getRulesTool.handler,
   // Layer 3 — Reasoning Map. With `signals`, returns the governing answer shape; without, the Turtle.
-  reasoning: getReasoningTool.handler
+  reasoning: getReasoningTool.handler,
+  // Cross-layer coverage inventory across all domains (no domain input).
+  domains: coverageTool.handler
 }
 
 const inputSchema = {
@@ -30,13 +33,14 @@ const inputSchema = {
   properties: {
     resource: {
       type: 'string',
-      enum: ['instructions', 'schema', 'pages', 'page', 'rules', 'reasoning'],
+      enum: ['instructions', 'schema', 'pages', 'page', 'rules', 'reasoning', 'domains'],
       description:
         'Which read-only resource to fetch. "instructions": operating doctrine (no other ' +
         'input). "schema": per-domain schema (requires domain). "pages": curated catalogue ' +
         '(optional domain/status filters). "page": a single page (requires filename). ' +
         '"rules": Layer 1 ruleset (requires domain; pass `inputs` to resolve eligibility). ' +
-        '"reasoning": Layer 3 Turtle map (requires domain; pass `signals` to get the answer shape).'
+        '"reasoning": Layer 3 Turtle map (requires domain; pass `signals` to get the answer shape). ' +
+        '"domains": cross-layer coverage inventory across all domains (no other input).'
     },
     domain: { type: 'string', description: 'Required for "schema"/"rules"/"reasoning"; optional filter for "pages".' },
     status: {
@@ -81,8 +85,9 @@ export const infoTool: ToolDefinition = {
     '(operating doctrine — call first to self-orient), "schema" (per-domain schema; needs ' +
     'domain), "pages" (curated catalogue; optional domain/status filters), "page" (a single ' +
     'page by filename), "rules" (Layer 1 ruleset; needs domain, optional `inputs` to resolve ' +
-    'eligibility), or "reasoning" (Layer 3 Turtle map; needs domain, optional `signals` to get ' +
-    'the governing answer shape). Consolidates the read tools across all three layers.',
+    'eligibility), "reasoning" (Layer 3 Turtle map; needs domain, optional `signals` to get ' +
+    'the governing answer shape), or "domains" (cross-layer coverage inventory across all ' +
+    'domains). Consolidates the read tools across all three layers.',
   inputSchema,
   handler: (input) => toEnvelope(() => infoImpl(input))
 }

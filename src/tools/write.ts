@@ -14,12 +14,14 @@ import { updateSchemaTool } from './update-schema'
 import { deprecatePageTool } from './deprecate-page'
 import { deleteBlobTool } from './delete-blob'
 import { setProvenanceTool } from './set-provenance'
+import { patchMetadataTool } from './patch-metadata'
 
 // operation value → the underlying handler that performs it.
 const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
   ingest: ingestTool.handler,
   register_source: registerSourceTool.handler,
   update_page: updateTool.handler,
+  patch_page_metadata: patchMetadataTool.handler,
   update_schema: updateSchemaTool.handler,
   deprecate_page: deprecatePageTool.handler,
   delete_blob: deleteBlobTool.handler,
@@ -34,12 +36,15 @@ const inputSchema = {
   properties: {
     operation: {
       type: 'string',
-      enum: ['ingest', 'register_source', 'update_page', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance'],
+      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance'],
       description:
         'Which write to perform. "ingest": store+chunk+embed a raw source (needs title, content, ' +
         'source_type). "register_source": register a citable source by metadata only (needs source_id, ' +
         'title). "update_page": create/update a curated wiki page (needs filename, title, content, ' +
-        'page_type, domain, confidence, tags, summary). "update_schema": write a per-domain schema ' +
+        'page_type, domain, confidence, tags, summary). "patch_page_metadata": lightweight ' +
+        'governance/review metadata patch on an existing page (reviewed_by/at, last_source_check, ' +
+        'allowed_use, business_consequence_if_stale, invalidation_policy) with no re-embed or history. ' +
+        '"update_schema": write a per-domain schema ' +
         '(needs domain, schema). "deprecate_page": soft-retire a page (needs filename, reason). ' +
         '"delete_blob": hard-delete a stale object from Azure — blob + vector + registry entry ' +
         '(needs container, blob_path, reason) — the irreversible cleanup escape hatch. ' +

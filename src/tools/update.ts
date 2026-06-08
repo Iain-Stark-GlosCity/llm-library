@@ -13,7 +13,7 @@ import { ensureCollection, upsertPoints, QdrantPoint } from '../storage/qdrant'
 import { embed } from '../embed/openai'
 import { wikiPagePointId } from '../embed/ids'
 import { sparseVector } from '../embed/sparse'
-import { renderFrontmatter, extractCreated, inlineSourceIds } from './shared'
+import { renderFrontmatter, extractCreated, inlineSourceIds, assertValidDomain } from './shared'
 import { isUseMode, isOperationalUse } from './governance'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
@@ -65,9 +65,7 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   if (!['concept', 'source', 'synthesis', 'contradiction'].includes(a.page_type)) {
     throw new DomainException('VALIDATION_ERROR', 'page_type must be concept | source | synthesis | contradiction')
   }
-  if (typeof a.domain !== 'string' || !a.domain) {
-    throw new DomainException('VALIDATION_ERROR', 'domain is required')
-  }
+  assertValidDomain(a.domain)
   if (!['high', 'medium', 'low', 'unverified'].includes(a.confidence)) {
     throw new DomainException('VALIDATION_ERROR', 'confidence must be high | medium | low | unverified')
   }
