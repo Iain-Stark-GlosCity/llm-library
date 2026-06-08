@@ -56,13 +56,19 @@ const DOCTRINE = {
   ],
 
   tool_roles: {
-    library_ping: 'Liveness check (dependency-light). On every surface.',
+    library_ping:
+      'Liveness check (dependency-light). On every surface. Also reports contract metadata — ' +
+      'server_version, tool_contract_version, a shared contract_hash, and missing required env ' +
+      'settings — so a client can confirm every surface is on the same contract (see also ' +
+      'library_info resource: tool_versions for the full per-surface manifest).',
     library_info:
       'Read-only inspection across all three layers. Pick a resource: "instructions" (this ' +
       'doctrine), "schema" (per-domain advisory schema), "pages" (curated catalogue from ' +
       'manifest.json), "page" (a single curated page by filename), "rules" (Layer 1 ruleset; ' +
       'pass inputs to resolve eligibility), "reasoning" (Layer 3 Turtle map; pass signals to get ' +
-      'the governing answer shape).',
+      'the governing answer shape), "domains" (cross-layer coverage inventory across all domains), ' +
+      '"governance" (per-domain governance coverage and per-page use eligibility; requires domain), ' +
+      '"tool_versions" (the exposed tool/schema contract version manifest).',
     library_query:
       'Hybrid retrieval over curated pages (default) and/or raw chunks. Requires domain ' +
       'by default; set allow_cross_domain only for deliberate discovery.',
@@ -72,17 +78,25 @@ const DOCTRINE = {
       'shape + safety constraints, and returns a translation_brief (allowed, answer_shape, ' +
       'safety_constraints, must_include/must_not, cite_sources) for an LLM to render. Inputs: ' +
       'domain, question, optional intent (use mode), inputs (L1 facts), signals (e.g. ' +
-      '{ bailiff_present: true }).',
+      '{ bailiff_present: true }). Context is split into usable_results (permitted for the intent) ' +
+      'and blocked_results (each annotated with blocked_reason, may_use_for, must_not_use_for), and ' +
+      'an answer_scope tells the LLM whether it may answer, only acknowledge a gap, or refuse — so ' +
+      'blocked local-policy/index/checklist context is never treated as usable authority.',
     library_write:
       'Layer 2 mutating tool (library-admin endpoint only). Pick an operation: "ingest" (store + ' +
       'chunk + embed raw source), "register_source" (register a citable source by metadata), ' +
-      '"update_page" (the only curated wiki write path), "update_schema" (create/overwrite a ' +
+      '"update_page" (the only curated wiki write path), "patch_page_metadata" (patch governance/' +
+      'review fields — page_role, allowed_use/prohibited_use, last_source_check, review metadata — ' +
+      'in place without rewriting the body), "update_schema" (create/overwrite a ' +
       'per-domain schema), "deprecate_page" (soft-retire a page — preferred), "delete_blob" ' +
       '(irreversibly hard-delete a stale Azure object — blob, vector, AND registry entry in ' +
       'manifest.json/raw_manifest.json; use only when soft-retirement is not enough, e.g. ' +
       'lint-flagged orphans or dead raw sources), "set_provenance" (assign upstream_id/source_url ' +
       'to an existing source so stale-cache supersession detection can group its snapshots), ' +
-      '"mark_source_checked" (record last_upstream_check/upstream_status after source revalidation).',
+      '"mark_source_checked" (record last_upstream_check/upstream_status after source revalidation), ' +
+      '"migrate_governance" (dry-run by default, or apply: infer page_role and backfill default ' +
+      'governance metadata + invalidation policy across a governance_required domain; pass dry_run, ' +
+      'force, manual_accept_current, migrated_by).',
     library_update_rules:
       'Layer 1 write (rules-admin endpoint only). Create/overwrite a domain ruleset ' +
       '({domain}.rules.json): ordered rules (first match wins) with a closed predicate `when` ' +
@@ -90,7 +104,12 @@ const DOCTRINE = {
     library_update_reasoning:
       'Layer 3 write (rdf-admin endpoint only). Create/overwrite a domain reasoning map ' +
       '({domain}.ttl). The Turtle is parse-gated before it is stored.',
-    library_lint: 'Mechanical health checks over the wiki.'
+    library_lint:
+      'Mechanical health checks over the wiki. For governance_required domains it adds a strict ' +
+      'governance assurance pass (stable governed_* issue codes) that flags missing page_role, ' +
+      'missing allowed_use/prohibited_use, missing business_consequence_if_stale, missing ' +
+      'invalidation_policy, missing review metadata, and source/citation mismatches directly — ' +
+      'rather than leaving them to surface indirectly through query permissioning.'
   },
 
   synthesis_pages: {
@@ -107,11 +126,13 @@ const DOCTRINE = {
     answer_envelope:
       'library_query returns, per curated result: confidence (extraction quality), a freshness/currency block (stalest cited snapshot age, whether a newer snapshot exists), and a provenance block (cited source_ids with source_url, upstream_owner, capture date, upstream_status; plus the page review and permitted-use governance). Confidence and currency are independent axes.',
     page_governance_fields:
-      'allowed_use, prohibited_use (permitted-use vocabulary); last_source_check (when the curator last verified the page against its sources); business_consequence_if_stale (low|medium|high); invalidation_policy (when to re-check or retire). All optional.',
+      'page_role (governance role from a fixed vocabulary — e.g. statutory_extraction, compiler_grade_rule, validation_contract, local_policy, index, checklist, operational_model, synthesis — which drives default policy and whether decision_support is even eligible); allowed_use, prohibited_use (permitted-use vocabulary); last_source_check (when the curator last verified the page against its sources); business_consequence_if_stale (low|medium|high); invalidation_policy (when to re-check or retire). All optional; migrate_governance can infer page_role and backfill the rest.',
+    page_role:
+      'A page_role classifies what a page IS for governance, independent of page_type. Decision-support-bearing roles (statutory_extraction, compiler_grade_rule, validation_contract, local_policy) can support decision_support when their currency requirements are met; structural/navigational roles (index, checklist, operational_model, local_policy_placeholder, rule_family) are intentionally NOT decision-support authority and are blocked from that mode regardless of allowed_use. Set it on update_page/patch_page_metadata, or let migrate_governance infer it (inference is conservative — review and correct high-impact pages afterward).',
     source_provenance_fields:
       'upstream_owner (who owns the authoritative source); upstream_id (grouping identity); last_upstream_check / upstream_status (set by upstream revalidation). Set provenance on existing sources with library_write (operation: set_provenance), then record revalidation with library_write (operation: mark_source_checked).',
     opt_in:
-      'The governance guard-rail lint checks (permitted-use, stale-risk, source currency) only apply to domains whose schema sets governance_required: true. Adopt governance per domain (controlled pilot), not all at once.'
+      'The governance guard-rail lint checks (permitted-use, stale-risk, source currency) and the strict governance assurance pass (governed_* issue codes) only apply to domains whose schema sets governance_required: true. Such domains fail closed: where governance metadata is incomplete, higher-consequence use is refused rather than guessed. Adopt governance per domain (controlled pilot) — typically: set governance_required, run migrate_governance (dry_run then apply), correct inferred page_role on high-impact pages, then burn down strict lint to zero errors.'
   },
 
   citation_convention: {
