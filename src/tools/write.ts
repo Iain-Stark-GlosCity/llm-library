@@ -15,6 +15,7 @@ import { deprecatePageTool } from './deprecate-page'
 import { deleteBlobTool } from './delete-blob'
 import { setProvenanceTool } from './set-provenance'
 import { patchMetadataTool } from './patch-metadata'
+import { markSourceCheckedTool } from './mark-source-checked'
 
 // operation value → the underlying handler that performs it.
 const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
@@ -25,7 +26,8 @@ const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = 
   update_schema: updateSchemaTool.handler,
   deprecate_page: deprecatePageTool.handler,
   delete_blob: deleteBlobTool.handler,
-  set_provenance: setProvenanceTool.handler
+  set_provenance: setProvenanceTool.handler,
+  mark_source_checked: markSourceCheckedTool.handler
 }
 
 // Union of every field used by the underlying operations. Per-operation requirements
@@ -36,7 +38,7 @@ const inputSchema = {
   properties: {
     operation: {
       type: 'string',
-      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance'],
+      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked'],
       description:
         'Which write to perform. "ingest": store+chunk+embed a raw source (needs title, content, ' +
         'source_type). "register_source": register a citable source by metadata only (needs source_id, ' +
@@ -49,7 +51,8 @@ const inputSchema = {
         '"delete_blob": hard-delete a stale object from Azure — blob + vector + registry entry ' +
         '(needs container, blob_path, reason) — the irreversible cleanup escape hatch. ' +
         '"set_provenance": set upstream_id/source_url on an existing source (needs source_id) for ' +
-        'stale-cache supersession grouping.'
+        'stale-cache supersession grouping. "mark_source_checked": record upstream revalidation ' +
+        'status on an existing source (needs source_id, upstream_status).'
     },
 
     // shared / ingest / register_source
@@ -75,6 +78,11 @@ const inputSchema = {
     allowed_use: { type: 'array', items: { type: 'string' } },
     prohibited_use: { type: 'array', items: { type: 'string' } },
     last_source_check: { type: 'string' },
+    last_upstream_check: { type: 'string' },
+    upstream_status: { type: 'string', enum: ['current', 'superseded', 'unavailable', 'unknown'] },
+    checked_by: { type: 'string', maxLength: 120 },
+    check_method: { type: 'string', enum: ['manual', 'web_fetch', 'legislation_api', 'system'] },
+    notes: { type: 'string', maxLength: 1000 },
     business_consequence_if_stale: { type: 'string', enum: ['low', 'medium', 'high'] },
     invalidation_policy: { type: 'string', maxLength: 500 },
     sources: { type: 'array', items: { type: 'string' } },
@@ -121,8 +129,9 @@ export const writeTool: ToolDefinition = {
     'by metadata only), "update_page" (the only curated wiki write path), "update_schema" (write a ' +
     'per-domain schema), "deprecate_page" (soft-retire a page), "delete_blob" (hard-delete a ' +
     'stale Azure object — blob, vector, and registry entry — the irreversible cleanup escape hatch), ' +
-    'or "set_provenance" (assign upstream_id/source_url to an existing source for stale-cache ' +
-    'supersession grouping).',
+    '"set_provenance" (assign upstream_id/source_url to an existing source for stale-cache ' +
+    'supersession grouping), or "mark_source_checked" (record upstream revalidation status ' +
+    'on an existing source).',
   inputSchema,
   handler: (input) => toEnvelope(() => writeImpl(input))
 }

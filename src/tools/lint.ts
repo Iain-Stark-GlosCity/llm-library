@@ -355,14 +355,26 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
             severity: 'error',
             suggested_fix: 'Re-ingest the upstream source and update this page to cite the fresh snapshot.'
           })
-        } else if (!src?.last_upstream_check) {
+        } else if (src?.upstream_status === 'superseded') {
+          issues.push({
+            type: 'active_page_cites_superseded_source',
+            page: p.filename,
+            source_id: sourceId,
+            description: `cited source "${sourceId}" is marked upstream_status: superseded`,
+            severity: 'warning',
+            suggested_fix: 'Update this page to cite the current upstream snapshot, or document why the superseded source remains intentionally pinned.'
+          })
+        } else if (!src?.last_upstream_check || src?.upstream_status === 'unknown') {
+          const reason = !src?.last_upstream_check
+            ? 'no last_upstream_check'
+            : 'upstream_status is unknown'
           issues.push({
             type: 'active_page_cites_unchecked_source',
             page: p.filename,
             source_id: sourceId,
-            description: `cited source "${sourceId}" has never been revalidated against upstream (no last_upstream_check)`,
+            description: `cited source "${sourceId}" has not been confirmed current against upstream (${reason})`,
             severity: 'info',
-            suggested_fix: 'Run upstream revalidation on the source to establish its currency.'
+            suggested_fix: 'Run upstream revalidation on the source with library_write (operation: mark_source_checked).'
           })
         }
       }

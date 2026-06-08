@@ -81,7 +81,8 @@ const DOCTRINE = {
       '(irreversibly hard-delete a stale Azure object — blob, vector, AND registry entry in ' +
       'manifest.json/raw_manifest.json; use only when soft-retirement is not enough, e.g. ' +
       'lint-flagged orphans or dead raw sources), "set_provenance" (assign upstream_id/source_url ' +
-      'to an existing source so stale-cache supersession detection can group its snapshots).',
+      'to an existing source so stale-cache supersession detection can group its snapshots), ' +
+      '"mark_source_checked" (record last_upstream_check/upstream_status after source revalidation).',
     library_update_rules:
       'Layer 1 write (rules-admin endpoint only). Create/overwrite a domain ruleset ' +
       '({domain}.rules.json): ordered rules (first match wins) with a closed predicate `when` ' +
@@ -108,7 +109,7 @@ const DOCTRINE = {
     page_governance_fields:
       'allowed_use, prohibited_use (permitted-use vocabulary); last_source_check (when the curator last verified the page against its sources); business_consequence_if_stale (low|medium|high); invalidation_policy (when to re-check or retire). All optional.',
     source_provenance_fields:
-      'upstream_owner (who owns the authoritative source); upstream_id (grouping identity); last_upstream_check / upstream_status (set by upstream revalidation). Set provenance on existing sources with library_write (operation: set_provenance).',
+      'upstream_owner (who owns the authoritative source); upstream_id (grouping identity); last_upstream_check / upstream_status (set by upstream revalidation). Set provenance on existing sources with library_write (operation: set_provenance), then record revalidation with library_write (operation: mark_source_checked).',
     opt_in:
       'The governance guard-rail lint checks (permitted-use, stale-risk, source currency) only apply to domains whose schema sets governance_required: true. Adopt governance per domain (controlled pilot), not all at once.'
   },
@@ -135,7 +136,7 @@ const DOCTRINE = {
     'block (stalest cited snapshot age, whether a newer snapshot exists) alongside confidence. library_lint ' +
     'flags cites_superseded_source (a newer snapshot of the same upstream exists), snapshot_aged (older than ' +
     'a domain schema max_snapshot_age_days), and source_missing_upstream_id (no upstream identity, so ' +
-    'supersession cannot be detected). Snapshots are grouped by upstream_id, falling back to source_url; set ' +
+    'supersession cannot be detected). Domains with governance_required also flag active_page_cites_unchecked_source until cited sources have last_upstream_check and a known upstream_status; record that with library_write (operation: mark_source_checked). Snapshots are grouped by upstream_id, falling back to source_url; set ' +
     'one with library_write (operation: set_provenance) to make a source groupable. The librarian decides ' +
     'whether stale cache warrants re-ingesting the source and re-curating the page.',
 
