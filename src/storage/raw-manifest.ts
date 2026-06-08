@@ -21,7 +21,10 @@ export interface SourceEntry {
   // are written by upstream revalidation (Phase 2); until then currency is "unknown".
   upstream_owner?: string
   last_upstream_check?: string
-  upstream_status?: 'unknown' | 'current' | 'changed' | 'unreachable'
+  upstream_status?: 'unknown' | 'current' | 'superseded' | 'unavailable' | 'changed' | 'unreachable'
+  checked_by?: string
+  check_method?: 'manual' | 'web_fetch' | 'legislation_api' | 'system'
+  revalidation_notes?: string
   created: string
   chunks_indexed: number
   embedding_status: 'ok' | 'failed'
