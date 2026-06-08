@@ -335,21 +335,25 @@ lets a domain adopt them one at a time.
   `source_id`s of the *use-permitted* Layer 2 results only — so citation is bound to what
   retrieval actually allowed for the declared `intent`.
 
-**The one boolean that fuses all three.** `translation_brief.allowed` is the strict
-conjunction of every layer's verdict — any single layer can veto:
+**The one boolean that fuses all three.** `translation_brief.allowed` is a conjunction of
+the layers' verdicts — but only an *active* veto counts, so an unconfigured governing layer
+never blocks a domain that does have context:
 
 ```
-allowed = (L1 eligibility === "eligible")
+allowed = (L1 eligibility !== "ineligible")     // indeterminate / no ruleset = "L1 doesn't govern", not a deny
         AND (L2 returned ≥1 use-permitted result)
         AND (L3 answer_shape !== "Refuse")
 ```
 
-No ruleset ⇒ eligibility is `indeterminate` ⇒ `allowed: false`. No permitted context ⇒
-`allowed: false`. A map that resolves to a `Refuse` shape ⇒ `allowed: false`. The brief
-always carries a `note` naming which layer withheld, so a `false` is actionable rather
-than opaque — and the other layers' outputs are still returned, so a consumer can fall
-back to Layer 2 context under an explicit "not eligible" / "do not answer substantively"
-instruction.
+The distinction matters: an *absent* ruleset resolves to `indeterminate` ("Layer 1 makes no
+determination"), which is **not** the same as an explicit `ineligible` ("Layer 1 denies").
+Only the latter vetoes. So a domain with rich Layer 2 context but no Constitution can still
+be `allowed` — and when it is, the brief's `note` reminds the consumer not to assert
+eligibility. No permitted context ⇒ `allowed: false`; a map that resolves to a `Refuse`
+shape ⇒ `allowed: false`. The brief always carries a `note` naming which layer withheld (or
+that eligibility was undetermined), so a `false` is actionable and an `allowed: true` on an
+ungoverned domain is still correctly qualified. A domain author who wants a hard default
+block sets an `ineligible` `default_outcome` in the ruleset.
 
 **Per-domain adoption, graceful degradation.** Each layer is opt-in per domain through its
 own artifact, and a missing artifact never errors — it contributes nothing and is recorded

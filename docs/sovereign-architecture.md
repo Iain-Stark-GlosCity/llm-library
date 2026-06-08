@@ -127,9 +127,13 @@ front of every route, admin routes especially, before loading anything sensitive
 3. **Layer 3** — traverse the reasoning map for the governing `answer_shape`,
    `safety_constraints`, `must_include` / `must_not`, and `overrides`.
 4. **Compose** one package whose `translation_brief` is an explicit instruction set:
-   `allowed` (eligible AND has permitted context AND not blocked), `answer_shape`,
-   `safety_constraints`, `must_include`, `must_not`, and `cite_sources` (the provenance
-   source ids of the permitted results).
+   `allowed` (NOT explicitly ineligible AND has permitted context AND not blocked),
+   `answer_shape`, `safety_constraints`, `must_include`, `must_not`, and `cite_sources`
+   (the provenance source ids of the permitted results). Only an explicit Layer 1
+   `ineligible` vetoes; an absent ruleset resolves to `indeterminate` ("Layer 1 does not
+   govern this domain") and does **not** block, so a domain with Layer 2 context but no
+   Constitution can still be `allowed` — the brief's `note` then flags that eligibility was
+   undetermined.
 
 The consuming LLM renders prose to `answer_shape`, honouring `must_include` / `must_not`
 and citing `cite_sources` — and makes no eligibility, retrieval, or safety judgement of its

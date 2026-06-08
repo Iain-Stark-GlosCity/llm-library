@@ -118,14 +118,21 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
   }
 
   // --- Compose the governed answer package. ---
-  const eligible = eligibility.eligibility === 'eligible'
+  // Layer 1 vetoes ONLY on an explicit `ineligible`. An absent ruleset (reason_code
+  // no_ruleset) or a ruleset that reaches no determination both resolve to `indeterminate`
+  // — "Layer 1 does not govern this", which is NOT a denial. Treating indeterminate as a
+  // veto (the old behaviour) meant a domain with rich Layer 2 context but no Constitution
+  // could never be `allowed`; "no opinion" was conflated with "no". A domain author who
+  // wants a hard default block sets an `ineligible` default_outcome instead.
+  const eligibilityDetermined = eligibility.eligibility === 'eligible'
+  const eligibilityBlocks = eligibility.eligibility === 'ineligible'
   const permittedResults = (context.results || []).filter((r) =>
     intent ? r.use_permitted === true : true
   )
   const hasPermittedContext = permittedResults.length > 0
   // The map can hard-block by demanding a Refuse shape; otherwise it only shapes the answer.
   const reasoningBlocks = reasoning.answer_shape === 'Refuse'
-  const allowed = eligible && hasPermittedContext && !reasoningBlocks
+  const allowed = !eligibilityBlocks && hasPermittedContext && !reasoningBlocks
 
   // Sources the LLM must cite: the provenance source_ids of the permitted curated results.
   const citeSources = Array.from(
@@ -146,9 +153,11 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
     must_not: reasoning.must_not,
     cite_sources: citeSources,
     note: allowed
-      ? 'Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
-      : !eligible
-        ? 'Not eligible under Layer 1; do not assert eligibility. Explain the position and, if a shape is set, follow it.'
+      ? eligibilityDetermined
+        ? 'Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
+        : 'Layer 1 makes no eligibility determination for this domain; do not assert eligibility. Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
+      : eligibilityBlocks
+        ? 'Ineligible under Layer 1; do not assert eligibility. Explain the position and, if a shape is set, follow it.'
         : !hasPermittedContext
           ? 'No permitted curated context for this intent; do not answer substantively.'
           : 'Reasoning map blocks a substantive answer for this intersection.'
