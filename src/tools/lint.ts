@@ -9,14 +9,18 @@ import { listSchemaDomains, readSchema } from '../storage/schema'
 import { scrollPoints } from '../storage/qdrant'
 import { daysSince, inlineSourceIds } from './shared'
 import { computeSourceFreshness } from './freshness'
-import { isOperationalUse } from './governance'
+import { isOperationalUse, isPageRole } from './governance'
 
 interface LintIssue {
   type: string
+  code?: string
+  filename?: string
   page?: string
   source_id?: string
   domain?: string
   description: string
+  detail?: string
+  level?: 'error' | 'warning' | 'info'
   severity: 'error' | 'warning' | 'info'
   suggested_fix?: string
 }
@@ -338,6 +342,55 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
       }
     }
 
+
+    // Strict governance assurance pass for governed domains. These issue codes are
+    // stable for automation and intentionally duplicate some older structural checks
+    // under governed_* names so callers can audit governance completeness directly.
+    if (governanceRequired) {
+      const pushGov = (code: string, severity: 'error' | 'warning' | 'info', detail: string, suggested_fix: string, source_id?: string) => {
+        issues.push({
+          type: code,
+          code,
+          page: p.filename,
+          filename: p.filename,
+          ...(source_id ? { source_id } : {}),
+          description: detail,
+          severity,
+          suggested_fix
+        })
+      }
+      const decisionEligible = (p.allowed_use || []).includes('decision_support') && !(p.prohibited_use || []).includes('decision_support')
+      if (!p.page_role) pushGov('governed_page_missing_page_role', 'warning', 'governed active page has no page_role metadata', 'Infer and set page_role via patch_page_metadata or migrate_governance.')
+      else if (!isPageRole(p.page_role)) pushGov('governed_page_invalid_page_role', 'warning', `page_role is not recognised: ${p.page_role}`, 'Set page_role to a supported governance role.')
+      if (!Array.isArray(p.allowed_use) || p.allowed_use.length === 0) pushGov('governed_page_missing_allowed_use', 'warning', 'governed active page is missing allowed_use', 'Apply the page_role default policy or set allowed_use explicitly.')
+      if (!Array.isArray(p.prohibited_use) || p.prohibited_use.length === 0) pushGov('governed_page_missing_prohibited_use', 'warning', 'governed active page is missing prohibited_use', 'Apply the page_role default policy or set prohibited_use explicitly; operational modes should remain prohibited.')
+      if (!p.business_consequence_if_stale) pushGov('governed_page_missing_stale_risk', 'warning', 'governed active page is missing business_consequence_if_stale', 'Set business_consequence_if_stale to low, medium, or high.')
+      if (!p.invalidation_policy) pushGov('governed_page_missing_invalidation_policy', 'warning', 'governed active page is missing invalidation_policy', 'Add an invalidation policy explaining when the page must be re-checked or retired.')
+      if (!p.last_source_check) pushGov('governed_page_missing_last_source_check', decisionEligible ? 'warning' : 'info', 'governed active page is missing last_source_check', 'Verify the page against cited sources and set last_source_check.')
+      if (!p.review_after) pushGov('governed_page_missing_review_after', 'warning', 'governed active page is missing review_after', 'Set review_after to the next required review date.')
+      if (!p.reviewed_by || !p.reviewed_at) pushGov('governed_page_missing_review_metadata', 'warning', 'governed active page is missing reviewed_by or reviewed_at', 'Set reviewed_by and reviewed_at after review.')
+      if ((p.sources || []).length === 0) pushGov('governed_page_missing_source_metadata', 'error', 'governed active page has no sources[] metadata', 'Add at least one registered source_id to sources[].')
+
+      const blob = await readBlob(wiki, `pages/${p.filename}`)
+      const body = blob?.content ?? ''
+      const inlineSources = inlineSourceIds(body)
+      const inlineSet = new Set(inlineSources)
+      const metadataSet = new Set(p.sources || [])
+      if (inlineSources.length === 0) pushGov('governed_page_missing_inline_citation', 'error', 'governed active page body contains no inline [source: ...] citation', 'Add inline [source: <source_id>] markers near supported claims.')
+      for (const sourceId of inlineSources) {
+        if (!metadataSet.has(sourceId)) pushGov('governed_page_cites_source_not_in_metadata', 'error', `inline citation ${sourceId} is not listed in sources[]`, `Add ${sourceId} to sources[] or remove the inline citation.`, sourceId)
+      }
+      for (const sourceId of p.sources || []) {
+        if (!inlineSet.has(sourceId)) pushGov('governed_page_metadata_source_not_cited', 'error', `sources[] entry ${sourceId} is not cited inline`, `Add an inline [source: ${sourceId}] marker or remove the metadata entry.`, sourceId)
+        const src = sourceById.get(sourceId)
+        if (!src) continue
+        if (!src.source_url && !src.upstream_id) pushGov('governed_page_source_missing_upstream_identity', 'error', `source ${sourceId} has neither source_url nor upstream_id`, 'Set source_url or upstream_id via set_provenance/register_source.', sourceId)
+        if (!src.upstream_owner) pushGov('governed_page_source_missing_upstream_owner', 'warning', `source ${sourceId} has no upstream_owner`, 'Set upstream_owner on the source metadata.', sourceId)
+        if (!src.last_upstream_check) pushGov('governed_page_source_unchecked', decisionEligible ? 'warning' : 'info', `source ${sourceId} has no last_upstream_check`, 'Run mark_source_checked after verifying the upstream source.', sourceId)
+        if (!src.upstream_status || src.upstream_status === 'unknown') pushGov('governed_page_source_unknown_status', decisionEligible ? 'warning' : 'info', `source ${sourceId} has unknown upstream_status`, 'Run mark_source_checked with current/superseded/unavailable after verification.', sourceId)
+      }
+    }
+
     for (const sourceId of p.sources || []) {
       const f = freshness.get(sourceId)
       if (!f) continue // registered or unknown source: not a snapshot
@@ -478,7 +531,14 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
     }
   }
 
-  return ok({ issues, issue_count: issues.length }, [])
+  const normalizedIssues = issues.map((i) => ({
+    ...i,
+    code: i.code ?? i.type,
+    filename: i.filename ?? i.page,
+    level: i.level ?? i.severity,
+    detail: i.detail ?? i.description
+  }))
+  return ok({ issues: normalizedIssues, issue_count: normalizedIssues.length }, [])
 }
 
 export const lintTool: ToolDefinition = {

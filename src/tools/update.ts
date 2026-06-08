@@ -14,7 +14,7 @@ import { embed } from '../embed/openai'
 import { wikiPagePointId } from '../embed/ids'
 import { sparseVector } from '../embed/sparse'
 import { renderFrontmatter, extractCreated, inlineSourceIds, assertValidDomain } from './shared'
-import { isUseMode, isOperationalUse } from './governance'
+import { isUseMode, isOperationalUse, isPageRole, PAGE_ROLES } from './governance'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
 
@@ -25,6 +25,7 @@ const inputSchema = {
     title: { type: 'string', maxLength: 120 },
     content: { type: 'string', maxLength: 50_000 },
     page_type: { type: 'string', enum: ['concept', 'source', 'synthesis', 'contradiction'] },
+    page_role: { type: 'string', enum: [...PAGE_ROLES] },
     domain: { type: 'string' },
     confidence: { type: 'string', enum: ['high', 'medium', 'low', 'unverified'] },
     tags: { type: 'array', items: { type: 'string' }, maxItems: 10 },
@@ -90,6 +91,8 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const title: string = a.title
   const content: string = a.content
   const pageType: string = a.page_type
+  const pageRole = typeof a.page_role === 'string' ? a.page_role as any : undefined
+  if (pageRole && !isPageRole(pageRole)) throw new DomainException('VALIDATION_ERROR', `page_role must be one of: ${PAGE_ROLES.join(', ')}`)
   const domain: string = a.domain
   const confidence: string = a.confidence
   const summary: string = a.summary
@@ -209,6 +212,7 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   const frontmatter = renderFrontmatter({
     title,
     type: pageType,
+    page_role: pageRole,
     domain,
     confidence,
     status,
@@ -283,6 +287,7 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
       filename,
       title,
       type: pageType,
+      page_role: pageRole,
       domain,
       confidence,
       status,
