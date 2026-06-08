@@ -5,7 +5,7 @@
 
 import { ToolDefinition, ok } from '../types'
 import { diagnosticsWarnings, getRuntimeDiagnostics } from '../runtime-diagnostics'
-import { GOVERNANCE_POLICY_VERSION } from './governance'
+import { TOOL_CONTRACT_VERSION } from './version'
 import { createHash } from 'crypto'
 
 export const pingTool: ToolDefinition = {
@@ -20,7 +20,7 @@ export const pingTool: ToolDefinition = {
   },
   handler: async () => {
     const diagnostics = getRuntimeDiagnostics('library-mcp')
-    const contract = { server_version: GOVERNANCE_POLICY_VERSION, tool_contract_version: GOVERNANCE_POLICY_VERSION }
+    const contract = { server_version: TOOL_CONTRACT_VERSION, tool_contract_version: TOOL_CONTRACT_VERSION }
     return ok({ ...diagnostics, ...contract, manifest_generated_at: new Date().toISOString(), contract_hash: createHash('sha256').update(JSON.stringify(contract)).digest('hex') }, diagnosticsWarnings(diagnostics))
   }
 }

@@ -3,6 +3,7 @@
 
 import { PageEntry, PageRole } from '../storage/manifest'
 import { SourceEntry } from '../storage/raw-manifest'
+import { TOOL_CONTRACT_VERSION } from './version'
 
 export const SUPPORTED_USE_MODES = [
   'analysis',
@@ -39,7 +40,7 @@ export const PAGE_ROLES = [
   'unknown'
 ] as const
 
-export const GOVERNANCE_POLICY_VERSION = '2026-06-08.4'
+export const GOVERNANCE_POLICY_VERSION = TOOL_CONTRACT_VERSION
 
 export const PAGE_ROLE_DEFAULTS: Partial<Record<PageRole, {
   allowed_use: string[]

@@ -3,7 +3,7 @@ import { readManifest } from '../storage/manifest'
 import { readRawManifest } from '../storage/raw-manifest'
 import { readSchema } from '../storage/schema'
 import { computeSourceFreshness, computePageFreshness } from './freshness'
-import { governanceStatusForUse, OPERATIONAL_USE_MODES } from './governance'
+import { governanceStatusForUse, evaluateUse, OPERATIONAL_USE_MODES } from './governance'
 
 const inputSchema = {
   type: 'object',
@@ -32,6 +32,8 @@ async function governanceInventoryImpl(input: unknown): Promise<DomainEnvelope> 
     const checked = sources.length > 0 && sources.every((s) => Boolean(s.last_upstream_check))
     const current = sources.length > 0 && sources.every((s) => s.upstream_status === 'current')
     const ds = governanceStatusForUse('decision_support', p, sources, freshness.superseded)
+    const pg = governanceStatusForUse('public_guidance', p, sources, freshness.superseded)
+    const sg = governanceStatusForUse('staff_guidance', p, sources, freshness.superseded)
     return {
       filename: p.filename,
       page_type: p.type,
@@ -46,7 +48,9 @@ async function governanceInventoryImpl(input: unknown): Promise<DomainEnvelope> 
       all_sources_checked: checked,
       all_sources_current: current,
       decision_support_status: ds.status,
-      decision_support_reason: ds.reason
+      decision_support_reason: ds.reason,
+      public_guidance_status: pg.status,
+      staff_guidance_status: sg.status
     }
   })
 
@@ -62,13 +66,13 @@ async function governanceInventoryImpl(input: unknown): Promise<DomainEnvelope> 
     pages_with_last_source_check: count((p) => Boolean(p.last_source_check)),
     pages_with_all_sources_checked_current: count((p) => p.all_sources_checked && p.all_sources_current),
     decision_support_eligible_pages: count((p) => p.decision_support_status === 'eligible'),
-    public_guidance_eligible_pages: active.filter((p) => governanceStatusForUse('public_guidance', p, (p.sources || []).map((id) => sourceById.get(id)).filter((s): s is NonNullable<typeof s> => Boolean(s))).status === 'eligible').length,
-    staff_guidance_eligible_pages: active.filter((p) => governanceStatusForUse('staff_guidance', p, (p.sources || []).map((id) => sourceById.get(id)).filter((s): s is NonNullable<typeof s> => Boolean(s))).status === 'eligible').length,
+    public_guidance_eligible_pages: count((p) => p.public_guidance_status === 'eligible'),
+    staff_guidance_eligible_pages: count((p) => p.staff_guidance_status === 'eligible'),
     intentionally_no_decision_support: count((p) => p.decision_support_status === 'intentionally_prohibited'),
     refused_due_to_missing_metadata: count((p) => p.decision_support_status === 'missing_governance_metadata'),
     refused_due_to_source_currency: count((p) => p.decision_support_status === 'source_unchecked' || p.decision_support_status === 'source_superseded' || p.decision_support_status === 'stale_snapshot'),
     refused_due_to_in_prohibited_use: count((p) => p.decision_support_reason.includes('in_prohibited_use') || p.decision_support_reason.includes('page_role_not_decision_support')),
-    operational_modes_globally_refused: OPERATIONAL_USE_MODES.every((mode) => mode.length > 0)
+    operational_modes_globally_refused: OPERATIONAL_USE_MODES.every((mode) => !evaluateUse(mode, {}).permitted)
   }
 
   return ok({ ...coverage, pages }, [])
