@@ -307,13 +307,66 @@ not the model's mood — selects which gate closes.
 
 ### How they compose — `library_resolve`
 
-`library_resolve` runs all three in order: **L1 eligibility → L2 context → L3 answer shape
-+ safety**, returning a single package with a **`translation_brief`** (`allowed`,
-`answer_shape`, `safety_constraints`, `must_include`, `must_not`, `cite_sources`). The LLM
-renders prose to that brief and makes no governance call. The layers are adopted **per
-domain** and degrade gracefully: a domain with no ruleset resolves eligibility as
-`indeterminate`; one with no map returns an empty answer shape — and you fall back to
-Layer 2 context alone. Nothing forces a domain to adopt all three at once.
+`library_resolve` is where the three layers actually meet. It is the only place that runs
+all three for one question, in a fixed order, and reduces their separate verdicts to a
+single governed package. The interaction is deterministic, and each layer reads only the
+slice of the request meant for it:
+
+| Request field | Routed to | Layer produces |
+|---|---|---|
+| `inputs` (structured facts) | **L1 — Constitution** | `eligibility`, `rule_fired`, `reason_code`, `governs[]` |
+| `question` / `intent` / `top_k` | **L2 — Library** (reuses `library_query`) | governed results: `confidence`, `freshness`, `provenance`, `use_permitted` |
+| `signals` (active context) | **L3 — Reasoning Map** | `answer_shape`, `safety_constraints`, `must_include`, `must_not`, `overrides` |
+| `domain` | all three | selects `{domain}.rules.json`, the L2 domain filter, and `{domain}.ttl` |
+
+Run order is **L1 → L2 → L3**: eligibility is settled before a single document is
+retrieved, and the answer shape is settled last. The layers never call each other —
+`library_resolve` is the only coupling — which keeps each one independently testable and
+lets a domain adopt them one at a time.
+
+**Where the layers actually touch.** Two seams connect them, and both are *data, not code*:
+
+- **L1 → L3.** A rule's `outcome.governs` (e.g. `["RebuildSupportShape"]`) names the
+  Layer 3 answer-shape an eligible outcome expects. Layer 3 can then `overrides` that
+  standard shape when context demands it — the bailiff intersection overrides
+  `StandardRebuildAnswerShape` with `UrgentSafeguardingGuidance`. Eligibility points at a
+  shape; context can supersede it.
+- **L2 → brief.** The sources the LLM must cite (`cite_sources`) are the provenance
+  `source_id`s of the *use-permitted* Layer 2 results only — so citation is bound to what
+  retrieval actually allowed for the declared `intent`.
+
+**The one boolean that fuses all three.** `translation_brief.allowed` is the strict
+conjunction of every layer's verdict — any single layer can veto:
+
+```
+allowed = (L1 eligibility === "eligible")
+        AND (L2 returned ≥1 use-permitted result)
+        AND (L3 answer_shape !== "Refuse")
+```
+
+No ruleset ⇒ eligibility is `indeterminate` ⇒ `allowed: false`. No permitted context ⇒
+`allowed: false`. A map that resolves to a `Refuse` shape ⇒ `allowed: false`. The brief
+always carries a `note` naming which layer withheld, so a `false` is actionable rather
+than opaque — and the other layers' outputs are still returned, so a consumer can fall
+back to Layer 2 context under an explicit "not eligible" / "do not answer substantively"
+instruction.
+
+**Per-domain adoption, graceful degradation.** Each layer is opt-in per domain through its
+own artifact, and a missing artifact never errors — it contributes nothing and is recorded
+as a warning (`no_ruleset`, `no_reasoning_map`):
+
+| Layer | Per-domain artifact | Container | Absent ⇒ |
+|---|---|---|---|
+| L1 — Constitution | `{domain}.rules.json` | `library-rules` | eligibility `indeterminate` |
+| L2 — governance | `{domain}.schema.json` | `library-schemas` | governance lint stays off; the library still serves |
+| L3 — Reasoning Map | `{domain}.ttl` | `library-rdf` | empty answer shape; fall back to L2 context |
+
+So a domain can run on Layer 2 alone, gain a Constitution when eligibility starts to carry
+consequence, and gain a reasoning map when answer *shape* and safety need governing —
+without touching the others. (Note the two senses of "schema": the per-domain
+`{domain}.schema.json` above only *configures Layer 2 governance* — the `governance_required`
+switch and snapshot-age thresholds; the deterministic Constitution is its own
+`{domain}.rules.json`.)
 
 The whole arrangement puts the **organisation's rules and safety constraints, not the
 model, in charge of the decision.** Layer 2 can tell you a cached page is stale or not
@@ -331,11 +384,14 @@ council-tax / bailiff walkthrough:
 
 The system runs on Azure infrastructure with no vendor-specific AI services.
 
-**Storage** is Azure Blob Storage across three containers. `library-raw` holds
-ingested source documents and a source registry. `library-wiki` holds current wiki
+**Storage** is Azure Blob Storage across five containers, one set per layer. `library-raw`
+holds ingested source documents and a source registry; `library-wiki` holds current wiki
 pages, a version history directory, a human-readable catalogue (`index.md`), a
-machine-readable registry (`manifest.json`), and append-only logs. `library-schemas`
-holds the optional per-domain schema files.
+machine-readable registry (`manifest.json`), and append-only logs (these two are Layer 2).
+`library-schemas` holds the optional per-domain schema files that configure Layer 2
+governance. `library-rules` holds the Layer 1 deterministic rulesets (`{domain}.rules.json`),
+and `library-rdf` holds the Layer 3 Turtle reasoning maps (`{domain}.ttl`). Each layer's
+artifacts live in their own container so they can be keyed and administered separately.
 
 **Vector search** uses Qdrant. Each knowledge point stores a dense semantic vector
 and a sparse keyword vector. Queries generate both and fuse the results using
@@ -377,9 +433,13 @@ Functions reserves the `/admin` namespace for its own host API.
 
 ```
 src/
-  functions/mcp.ts     JSON-RPC dispatcher and tool routing
-  tools/               registry, info, query, write, lint, per-operation handlers, shared helpers
-  storage/             blobs, qdrant, manifest, raw-manifest, index, log, schema
+  functions/mcp.ts     JSON-RPC dispatcher; one HTTP function per surface (consumption + 3 admin)
+  tools/               registry, info, query, resolve, write, lint, update-rules, update-reasoning,
+                       per-operation handlers, shared helpers
+  rules/resolve.ts     Layer 1 — the pure deterministic eligibility resolver
+  rdf/                 Layer 3 — engine seam (oxigraph | n3), graph loader/cache, reasoner
+  storage/             blobs, qdrant, manifest, raw-manifest, index, log, schema (L2),
+                       rules (L1), + the rdf container helper in blobs
   embed/               openai, chunk, ids, sparse
   config.ts            environment-driven configuration
   types.ts             DomainEnvelope and ToolDefinition contracts
