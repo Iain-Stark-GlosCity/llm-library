@@ -34,7 +34,9 @@ const P = {
   hasSafetyConstraint: NS.sov + 'hasSafetyConstraint',
   mustInclude: NS.sov + 'mustInclude',
   mustNot: NS.sov + 'mustNot',
-  overrides: NS.sov + 'overrides'
+  overrides: NS.sov + 'overrides',
+  suppressResultPattern: NS.sov + 'suppressResultPattern',
+  allowSuppressedWhenQuestionPattern: NS.sov + 'allowSuppressedWhenQuestionPattern'
 }
 
 // The predicates the reasoner recognises (everything else in the ontology namespace is a
@@ -46,7 +48,9 @@ export const KNOWN_PREDICATES: ReadonlySet<string> = new Set([
   P.hasSafetyConstraint,
   P.mustInclude,
   P.mustNot,
-  P.overrides
+  P.overrides,
+  P.suppressResultPattern,
+  P.allowSuppressedWhenQuestionPattern
 ])
 // Predicates an intersection must declare to do anything useful.
 const REQUIRED_PREDICATES = [P.inDomain, P.whenSignal, P.requiresAnswerShape]
@@ -65,6 +69,8 @@ export interface ReasoningResult {
   must_include: string[]
   must_not: string[]
   overrides: string[]
+  suppress_result_patterns: string[]
+  allow_suppressed_when_question_patterns: string[]
 }
 
 // Local name of an IRI: the part after the last '#', '/', or ':'. The ':' case lets URN-style
@@ -87,7 +93,9 @@ function emptyResult(): ReasoningResult {
     safety_constraints: [],
     must_include: [],
     must_not: [],
-    overrides: []
+    overrides: [],
+    suppress_result_patterns: [],
+    allow_suppressed_when_question_patterns: []
   }
 }
 
@@ -112,6 +120,12 @@ function foldProps(subjectIri: string, props: { predicate: string; object: strin
         break
       case P.overrides:
         r.overrides.push(localName(t.object))
+        break
+      case P.suppressResultPattern:
+        r.suppress_result_patterns.push(t.object)
+        break
+      case P.allowSuppressedWhenQuestionPattern:
+        r.allow_suppressed_when_question_patterns.push(t.object)
         break
     }
   }

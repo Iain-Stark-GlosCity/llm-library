@@ -94,3 +94,88 @@ test('missingRequiredInputs resolves nested dotted paths', () => {
   assert.deepEqual(missingRequiredInputs(rs, inputs), ['absent.field'])
   assert.deepEqual(missingRequiredInputs(ruleset, inputs), []) // no schema → nothing missing
 })
+
+
+const councilTaxRuleset: RuleSet = {
+  domain: 'ctax-rebuild',
+  version: 'test-council-tax-eligibility.1',
+  rules: [
+    {
+      id: 'single-adult-discount-eligible',
+      description: 'One counted adult is the deterministic gateway for single adult discount.',
+      when: { op: 'eq', path: 'adult_count.counted_adults', value: 1 } as any,
+      outcome: { eligibility: 'eligible', reason_code: 'single_adult_discount_25_percent', governs: ['SinglePersonDiscountShape'] }
+    },
+    {
+      id: 'single-adult-discount-not-eligible',
+      description: 'More than one counted adult fails the single adult discount gateway.',
+      when: { op: 'gt', path: 'adult_count.counted_adults', value: 1 } as any,
+      outcome: { eligibility: 'ineligible', reason_code: 'more_than_one_counted_adult' }
+    },
+    {
+      id: 'smi-disregard-eligible',
+      when: { op: 'eq', path: 'person.smi_disregard_criteria_met', value: true } as any,
+      outcome: { eligibility: 'eligible', reason_code: 'smi_disregard_gateway', governs: ['DisregardShape'] }
+    },
+    {
+      id: 'student-disregard-eligible',
+      when: { op: 'eq', path: 'person.student_disregard_criteria_met', value: true } as any,
+      outcome: { eligibility: 'eligible', reason_code: 'student_disregard_gateway', governs: ['DisregardShape'] }
+    },
+    {
+      id: 'class-n-exempt-dwelling-eligible',
+      when: { op: 'eq', path: 'dwelling.class_n_conditions_met', value: true } as any,
+      outcome: { eligibility: 'eligible', reason_code: 'exempt_dwelling_class_n', governs: ['ExemptionShape'] }
+    },
+    {
+      id: 'disabled-reduction-gateway-eligible',
+      when: { op: 'eq', path: 'dwelling.disabled_reduction_gateway_met', value: true } as any,
+      outcome: { eligibility: 'eligible', reason_code: 'disabled_reduction_gateway', governs: ['ReductionShape'] }
+    },
+    {
+      id: 'owner-liability-hmo-eligible',
+      when: {
+        all: [
+          { op: 'eq', path: 'liability.hmo', value: true },
+          { op: 'eq', path: 'liability.owner', value: true }
+        ]
+      } as any,
+      outcome: { eligibility: 'eligible', reason_code: 'owner_liability_hmo', governs: ['LiabilityShape'] }
+    },
+    {
+      id: 'empty-property-premium-local-policy-required',
+      when: { op: 'eq', path: 'local_policy.empty_property_premium_slot', value: true } as any,
+      outcome: { eligibility: 'local_policy_required', reason_code: 'empty_property_premium_local_policy_required', governs: ['LocalPolicyPremiumShape'] }
+    },
+    {
+      id: 'ctr-working-age-local-policy-required',
+      when: { op: 'eq', path: 'ctr.working_age_scheme_slot', value: true } as any,
+      outcome: { eligibility: 'local_policy_required', reason_code: 'ctr_working_age_scheme_local_policy_required', governs: ['LocalCtrSchemeShape'] }
+    }
+  ],
+  default_outcome: { eligibility: 'indeterminate', reason_code: 'insufficient_facts' }
+} as RuleSet
+
+test('council tax Layer 1 resolves core discount, disregard, exemption, liability and local-policy slots deterministically', () => {
+  const cases: Array<[string, unknown, string, string, string | null]> = [
+    ['single adult discount', { adult_count: { counted_adults: 1 } }, 'eligible', 'single_adult_discount_25_percent', 'single-adult-discount-eligible'],
+    ['single adult discount refused', { adult_count: { counted_adults: 2 } }, 'ineligible', 'more_than_one_counted_adult', 'single-adult-discount-not-eligible'],
+    ['SMI disregard', { person: { smi_disregard_criteria_met: true } }, 'eligible', 'smi_disregard_gateway', 'smi-disregard-eligible'],
+    ['student disregard', { person: { student_disregard_criteria_met: true } }, 'eligible', 'student_disregard_gateway', 'student-disregard-eligible'],
+    ['Class N exemption', { dwelling: { class_n_conditions_met: true } }, 'eligible', 'exempt_dwelling_class_n', 'class-n-exempt-dwelling-eligible'],
+    ['disabled reduction', { dwelling: { disabled_reduction_gateway_met: true } }, 'eligible', 'disabled_reduction_gateway', 'disabled-reduction-gateway-eligible'],
+    ['owner liability HMO', { liability: { hmo: true, owner: true } }, 'eligible', 'owner_liability_hmo', 'owner-liability-hmo-eligible'],
+    ['local premium', { local_policy: { empty_property_premium_slot: true } }, 'local_policy_required', 'empty_property_premium_local_policy_required', 'empty-property-premium-local-policy-required'],
+    ['working age CTR', { ctr: { working_age_scheme_slot: true } }, 'local_policy_required', 'ctr_working_age_scheme_local_policy_required', 'ctr-working-age-local-policy-required'],
+    ['insufficient facts', { adult_count: {} }, 'indeterminate', 'insufficient_facts', null]
+  ]
+
+  for (const [label, facts, eligibility, reasonCode, ruleFired] of cases) {
+    const first = resolveEligibility(councilTaxRuleset, facts)
+    const second = resolveEligibility(councilTaxRuleset, JSON.parse(JSON.stringify(facts)))
+    assert.deepEqual(second, first, `${label} should be deterministic`)
+    assert.equal(first.eligibility, eligibility, label)
+    assert.equal(first.reason_code, reasonCode, label)
+    assert.equal(first.rule_fired, ruleFired, label)
+  }
+})

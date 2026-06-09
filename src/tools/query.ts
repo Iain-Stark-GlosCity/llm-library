@@ -325,6 +325,7 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         confidence: p.confidence,
         status: p.status,
         domain: p.domain,
+        tags: Array.isArray(p.tags) ? p.tags : [],
         freshness,
         provenance: provenanceFor(entry),
         score: h.score

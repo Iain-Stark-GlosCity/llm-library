@@ -20,4 +20,21 @@ sov:BailiffAtDoor a sov:SemanticIntersection ;
                             "must_signpost_emergency_support" ;
     sov:mustInclude "right_to_request_breathing_space" ,
                     "entry_rights_summary" ;
+    sov:suppressResultPattern "ctr" ,
+                              "council tax reduction" ,
+                              "pensioner income" ,
+                              "pensioner capital" ,
+                              "income capital" ,
+                              "working age ctr" ,
+                              "local ctr policy" ,
+                              "discount" ,
+                              "premium" ;
+    sov:allowSuppressedWhenQuestionPattern "can i get council tax reduction" ,
+                                           "can i afford this" ,
+                                           "income" ,
+                                           "capital" ,
+                                           "benefit" ,
+                                           "ctr" ,
+                                           "reduction" ,
+                                           "discount" ;
     sov:overrides shape:StandardRebuildAnswerShape .
