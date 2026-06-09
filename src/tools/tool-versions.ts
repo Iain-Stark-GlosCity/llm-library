@@ -3,7 +3,7 @@ import { DomainEnvelope, ToolDefinition, ok, toEnvelope } from '../types'
 import { TOOL_CONTRACT_VERSION } from './version'
 
 function versions(): Record<string, unknown> {
-  const operations = ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked', 'migrate_governance']
+  const operations = ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked', 'migrate_governance', 'reconcile_vectors']
   const payload = {
     server: 'library-mcp',
     server_version: TOOL_CONTRACT_VERSION,
