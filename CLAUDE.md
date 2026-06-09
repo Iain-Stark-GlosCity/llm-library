@@ -163,8 +163,9 @@ write, return ok: true with warnings: [“log_append_failed”].
 **ETag conflicts on shared files** (manifest.json, raw_manifest.json, index.md,
 log files): return CONFLICT. No silent retries. The caller decides.
 
-log.jsonl uses read-modify-write with ETag at MVP. If write contention becomes a
-problem later, replace with Azure Append Blob.
+log.jsonl and log.md are Azure APPEND blobs: appendBlock is atomic server-side, so
+concurrent operations never contend and appends do not re-upload history. A legacy
+block-blob log is migrated in place on first append.
 
 -----
 

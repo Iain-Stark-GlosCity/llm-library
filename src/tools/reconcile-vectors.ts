@@ -30,7 +30,7 @@ import { ensureCollection, scrollPoints, upsertPoints, setPayload, deletePoints,
 import { embed } from '../embed/openai'
 import { wikiPagePointId } from '../embed/ids'
 import { sparseVector } from '../embed/sparse'
-import { sha256, stripFrontmatter, assertValidDomain } from './shared'
+import { sha256, stripFrontmatter, assertValidDomain, resolveLibraryId } from './shared'
 
 type Mode = 'payload_only' | 'reembed_stale' | 'full_rebuild'
 const MODES: Mode[] = ['payload_only', 'reembed_stale', 'full_rebuild']
@@ -200,11 +200,14 @@ async function classify(libraryId: string, domain: string) {
       else if (p.domain !== page.domain) bucket = 'wrong_domain_vector'
       else if (!payloadComplete(p)) bucket = 'bad_payload_vector'
       else {
+        // Content drift (hash mismatch, or unknown legacy hash with a differing updated
+        // timestamp) and metadata-only drift both land in stale_embedding; buildPlan
+        // splits them into reembed vs payload-sync via oldContentHash.
+        const metadataDrift =
+          p.updated !== page.updated || p.status !== page.status || p.confidence !== page.confidence
         const contentChanged =
-          p.content_hash !== undefined ? p.content_hash !== contentHash : p.updated !== page.updated
-        if (contentChanged) bucket = 'stale_embedding'
-        else if (p.updated !== page.updated || p.status !== page.status || p.confidence !== page.confidence) bucket = 'stale_embedding'
-        else bucket = 'current_and_synced'
+          p.content_hash !== undefined ? p.content_hash !== contentHash : metadataDrift
+        bucket = contentChanged || metadataDrift ? 'stale_embedding' : 'current_and_synced'
       }
     }
     records.push({
@@ -362,7 +365,7 @@ async function reconcileVectorsImpl(input: unknown): Promise<DomainEnvelope> {
   const deleteDuplicates = a.delete_duplicates === true
   const includeDeprecated = a.include_deprecated === true
   const force = a.force === true
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   // full_rebuild re-embeds every active page (cost + churn), so an apply requires force.
   if (mode === 'full_rebuild' && !dryRun && !force) {
@@ -493,7 +496,7 @@ async function reconcileVectorsImpl(input: unknown): Promise<DomainEnvelope> {
     const wiki = await getWikiContainer()
     await writeBlob(wiki, logPath, JSON.stringify(auditDoc, null, 2), 'application/json; charset=utf-8')
   } catch (err) {
-    warnings.push('audit_log_write_failed', (err as Error).message)
+    warnings.push(`audit_log_write_failed: ${(err as Error).message}`)
   }
 
   // 5. Event log (warning only on failure).

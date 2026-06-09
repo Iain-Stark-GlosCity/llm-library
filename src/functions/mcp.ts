@@ -48,11 +48,16 @@ class RpcError extends Error {
 }
 
 // Per-surface dispatch context: the serverInfo name advertised on initialize and the tool
-// map this endpoint exposes.
-interface Surface {
+// map this endpoint exposes. Exported (with makeSurface/dispatch) so the JSON-RPC layer
+// is unit-testable without HTTP scaffolding.
+export interface Surface {
   serverName: string
   tools: ToolDefinition[]
   toolMap: Map<string, ToolDefinition>
+}
+
+export function makeSurface(serverName: string, tools: ToolDefinition[]): Surface {
+  return { serverName, tools, toolMap: new Map(tools.map((t) => [t.name, t])) }
 }
 
 function jsonResponse(body: unknown, status = 200): HttpResponseInit {
@@ -167,7 +172,7 @@ async function handleMethod(
   }
 }
 
-async function dispatch(
+export async function dispatch(
   surface: Surface,
   request: HttpRequest,
   context: InvocationContext
@@ -251,12 +256,7 @@ function createMcpFunction(opts: {
   serverName: string
   surface: SurfaceName
 }): void {
-  const tools = SURFACES[opts.surface]
-  const surface: Surface = {
-    serverName: opts.serverName,
-    tools,
-    toolMap: new Map(tools.map((t) => [t.name, t]))
-  }
+  const surface = makeSurface(opts.serverName, SURFACES[opts.surface])
   // authLevel 'anonymous' for MVP — MCP auth is deferred (function keys are a faff to
   // thread through MCP clients today). Put each route behind a key / APIM / Easy Auth before
   // loading anything sensitive — ADMIN routes especially: they mutate the Constitution

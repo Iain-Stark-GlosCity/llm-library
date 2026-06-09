@@ -204,6 +204,17 @@ export async function checkVocabulary(engine: RdfEngine, graph: LoadedGraph): Pr
   }
   for (const u of unknown) warnings.push(`unknown_reasoning_predicate:${localName(u)}`)
 
+  // whenSignal objects must be string LITERALS: the reasoner matches them against the
+  // caller's signal names, and a signal written as an IRI behaves differently per engine
+  // (SPARQL FILTER ... IN never matches an IRI against a string; the n3 traversal compares
+  // the full IRI text). Flag it so the map author fixes the Turtle rather than debugging
+  // engine-dependent matching.
+  for (const q of all) {
+    if (q.predicate === P.whenSignal && q.objectType !== 'Literal') {
+      warnings.push(`signal_not_literal:${localName(q.object)}`)
+    }
+  }
+
   // Intersection nodes typed in the ontology namespace.
   const subjects = all
     .filter((q) => q.predicate === P.type && q.object === P.intersection)

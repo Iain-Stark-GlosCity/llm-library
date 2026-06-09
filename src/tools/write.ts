@@ -4,7 +4,8 @@
 //
 // Nothing is lost: each operation delegates to the original tool's handler, so the
 // validation, write semantics, and partial-failure behaviour are identical — only the
-// exposed tool count shrinks. This tool is only listed in librarian mode.
+// exposed tool count shrinks. This tool is only exposed on the library-admin surface
+// (/api/mcp-library); exposure is route-based, not the former LIBRARY_MCP_MODE flag.
 
 import { DomainEnvelope, DomainException, ToolDefinition, toEnvelope } from '../types'
 import { ingestTool } from './ingest'
@@ -147,7 +148,7 @@ async function writeImpl(input: unknown): Promise<DomainEnvelope> {
 export const writeTool: ToolDefinition = {
   name: 'library_write',
   description:
-    'Mutating library operations (librarian mode only). Set `operation` to choose the write: ' +
+    'Mutating library operations (library-admin surface only). Set `operation` to choose the write: ' +
     '"ingest" (store + chunk + embed a raw source), "register_source" (register a citable source ' +
     'by metadata only), "update_page" (the only curated wiki write path), "update_schema" (write a ' +
     'per-domain schema), "deprecate_page" (soft-retire a page), "delete_blob" (hard-delete a ' +

@@ -5,7 +5,7 @@ import { readRawManifest, writeRawManifest } from '../storage/raw-manifest'
 import { readSchema } from '../storage/schema'
 import { appendLog } from '../storage/log'
 import { regenerateIndex } from '../storage/index'
-import { renderFrontmatter, stripFrontmatter } from './shared'
+import { renderFrontmatter, stripFrontmatter, resolveLibraryId } from './shared'
 import { GOVERNANCE_POLICY_VERSION, PAGE_ROLE_DEFAULTS, INVALIDATION_POLICY_DEFAULTS, inferPageRole } from './governance'
 
 const inputSchema = {
@@ -41,7 +41,7 @@ async function migrateGovernanceImpl(input: unknown): Promise<DomainEnvelope> {
   const force = a.force === true
   const manualAcceptCurrent = a.manual_accept_current === true
   const migratedBy = typeof a.migrated_by === 'string' && a.migrated_by ? a.migrated_by : 'library-mcp-governance-migration'
-  const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
   const schema = await readSchema(domain).catch(() => null)
   if (schema?.governance_required !== true) throw new DomainException('VALIDATION_ERROR', `domain ${domain} does not have governance_required: true`)
 

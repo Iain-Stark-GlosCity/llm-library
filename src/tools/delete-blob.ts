@@ -32,6 +32,7 @@ import { regenerateIndex } from '../storage/index'
 import { appendLog } from '../storage/log'
 import { ensureCollection, deletePoints } from '../storage/qdrant'
 import { wikiPagePointId, rawChunkPointId } from '../embed/ids'
+import { resolveLibraryId } from './shared'
 
 const CONTAINERS = ['wiki', 'raw', 'schema'] as const
 type ContainerName = (typeof CONTAINERS)[number]
@@ -86,7 +87,7 @@ async function deleteBlobImpl(input: unknown): Promise<DomainEnvelope> {
   const purgeVector = a.purge_vector !== false // default true
   const purgeManifest = a.purge_manifest !== false // default true
   const force = a.force === true
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
   const containerName = container as ContainerName
 
   if (PROTECTED[containerName].has(blobPath) && !force) {
@@ -132,7 +133,7 @@ async function deleteBlobImpl(input: unknown): Promise<DomainEnvelope> {
         warnings.push('no_vector_association')
       }
     } catch (err) {
-      warnings.push('vector_purge_failed', (err as Error).message)
+      warnings.push(`vector_purge_failed: ${(err as Error).message}`)
     }
   }
 
@@ -183,7 +184,7 @@ async function deleteBlobImpl(input: unknown): Promise<DomainEnvelope> {
       }
       // schema files and history/ copies have no registry entry — nothing to trim.
     } catch (err) {
-      warnings.push('manifest_purge_failed', (err as Error).message)
+      warnings.push(`manifest_purge_failed: ${(err as Error).message}`)
     }
   }
 

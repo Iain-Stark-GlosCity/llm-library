@@ -24,6 +24,23 @@ export function assertValidDomain(domain: unknown): string {
   return domain
 }
 
+// Resolve the optional library_id argument. Accepted for forward compatibility, but blob
+// storage paths (manifest.json, raw_manifest.json, pages/, logs) are NOT namespaced per
+// library — only Qdrant point ids and payloads are. A second library id would therefore
+// silently share and clobber the default library's blobs while keeping separate vectors.
+// Until blob paths are namespaced, any non-default id is rejected rather than corrupting.
+export function resolveLibraryId(a: Record<string, any> | undefined): string {
+  const id = a?.library_id
+  if (id === undefined || id === null || id === '') return 'default'
+  if (typeof id !== 'string' || id !== 'default') {
+    throw new DomainException(
+      'VALIDATION_ERROR',
+      `library_id ${JSON.stringify(id)} is not supported: blob storage is not namespaced per library yet, so a non-default id would silently share the default library's pages and manifests. Omit library_id or pass "default".`
+    )
+  }
+  return id
+}
+
 export function slugify(title: string): string {
   return title
     .toLowerCase()

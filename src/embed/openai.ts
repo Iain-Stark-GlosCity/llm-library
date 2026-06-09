@@ -4,9 +4,11 @@
 
 import { getConfig } from '../config'
 import { DomainException } from '../types'
+import { fetchWithRetry } from '../http'
 
 const ENDPOINT = 'https://api.openai.com/v1/embeddings'
 const EXPECTED_DIMS = 1536
+const TIMEOUT_MS = 60_000
 
 export async function embed(input: string | string[]): Promise<number[][]> {
   const cfg = getConfig()
@@ -16,14 +18,18 @@ export async function embed(input: string | string[]): Promise<number[][]> {
 
   let resp: Response
   try {
-    resp = await fetch(ENDPOINT, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${cfg.openaiApiKey}`,
-        'Content-Type': 'application/json'
+    resp = await fetchWithRetry(
+      ENDPOINT,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${cfg.openaiApiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ model: cfg.embeddingModel, input })
       },
-      body: JSON.stringify({ model: cfg.embeddingModel, input })
-    })
+      { timeoutMs: TIMEOUT_MS }
+    )
   } catch (err) {
     throw new DomainException('EMBEDDING_ERROR', `OpenAI unreachable: ${(err as Error).message}`)
   }

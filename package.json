@@ -12,6 +12,7 @@
     "watch": "tsc -w",
     "prestart": "npm run build",
     "start": "npx --yes azure-functions-core-tools@4 --javascript start",
+    "test": "tsc -p tsconfig.test.json && node --test \"dist-test/test/*.test.js\"",
     "smoke:entrypoint": "npm run build && node scripts/verify-functions-entrypoint.js",
     "verify:sovereign": "npm run build && node scripts/verify-sovereign.js"
   },

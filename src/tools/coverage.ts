@@ -15,6 +15,7 @@ import { readManifest } from '../storage/manifest'
 import { listSchemaDomains, readSchema } from '../storage/schema'
 import { listRuleDomains } from '../storage/rules'
 import { listRdfDomains } from '../rdf/graph'
+import { resolveLibraryId } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -36,7 +37,7 @@ interface DomainCoverage {
 
 async function coverageImpl(input: unknown): Promise<DomainEnvelope> {
   const a = (input ?? {}) as Record<string, any>
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   const { manifest } = await readManifest(libraryId)
   const [schemaDomains, ruleDomains, rdfDomains] = await Promise.all([
