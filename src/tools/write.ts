@@ -34,6 +34,12 @@ const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = 
   reconcile_vectors: reconcileVectorsTool.handler
 }
 
+// Single source of truth for the accepted operations. The visible inputSchema enum and
+// the published tool_versions manifest both derive from this, so the contract the client
+// sees can never drift from what the runtime actually dispatches (writeImpl validates
+// against the same OPERATIONS map). Add an operation in ONE place — the map above.
+export const WRITE_OPERATIONS: string[] = Object.keys(OPERATIONS)
+
 // Union of every field used by the underlying operations. Per-operation requirements
 // (e.g. content ≤50k for update_page vs ≤200k for ingest) are enforced authoritatively
 // by the delegated handlers; this schema is only a client hint, per the transport contract.
@@ -42,7 +48,7 @@ const inputSchema = {
   properties: {
     operation: {
       type: 'string',
-      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked', 'migrate_governance', 'reconcile_vectors'],
+      enum: WRITE_OPERATIONS,
       description:
         'Which write to perform. "ingest": store+chunk+embed a raw source (needs title, content, ' +
         'source_type). "register_source": register a citable source by metadata only (needs source_id, ' +
