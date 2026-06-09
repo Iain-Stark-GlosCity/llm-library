@@ -8,6 +8,7 @@ interface BlobRecord {
   kind: BlobKind
   content: string
   contentType?: string
+  etag: string
 }
 
 class FakeAppendBlobClient {
@@ -21,24 +22,13 @@ class FakeAppendBlobClient {
       throw Object.assign(new Error('invalid blob type'), { statusCode: 409, details: { errorCode: 'InvalidBlobType' } })
     }
     record.content += text
+    record.etag = bump(record.etag)
   }
 
   async createIfNotExists(options: any): Promise<{ succeeded: boolean }> {
     if (this.store.has(this.name)) return { succeeded: false }
-    this.store.set(this.name, { kind: 'append', content: '', contentType: options.blobHTTPHeaders.blobContentType })
+    this.store.set(this.name, { kind: 'append', content: '', contentType: options.blobHTTPHeaders.blobContentType, etag: '1' })
     return { succeeded: true }
-  }
-
-  async create(options: any): Promise<void> {
-    if (this.store.has(this.name)) {
-      throw Object.assign(new Error('already exists'), { statusCode: 409, details: { errorCode: 'BlobAlreadyExists' } })
-    }
-    this.store.set(this.name, { kind: 'append', content: '', contentType: options.blobHTTPHeaders.blobContentType })
-  }
-
-  async deleteIfExists(): Promise<{ succeeded: boolean }> {
-    const existed = this.store.delete(this.name)
-    return { succeeded: existed }
   }
 }
 
@@ -48,7 +38,26 @@ class FakeBlockBlobClient {
   async download(): Promise<{ etag: string; readableStreamBody: Readable }> {
     const record = this.store.get(this.name)
     if (!record) throw Object.assign(new Error('missing'), { statusCode: 404 })
-    return { etag: 'etag', readableStreamBody: Readable.from([record.content]) }
+    return { etag: record.etag, readableStreamBody: Readable.from([record.content]) }
+  }
+
+  async upload(content: string, length: number, options: any): Promise<{ etag: string }> {
+    assert.equal(length, Buffer.byteLength(content))
+    const existing = this.store.get(this.name)
+    const ifMatch = options.conditions?.ifMatch
+    const ifNoneMatch = options.conditions?.ifNoneMatch
+
+    if (ifNoneMatch === '*' && existing) throw Object.assign(new Error('exists'), { statusCode: 409 })
+    if (ifMatch && existing?.etag !== ifMatch) throw Object.assign(new Error('conflict'), { statusCode: 412 })
+
+    const nextEtag = bump(existing?.etag ?? '0')
+    this.store.set(this.name, {
+      kind: 'block',
+      content,
+      contentType: options.blobHTTPHeaders.blobContentType,
+      etag: nextEtag
+    })
+    return { etag: nextEtag }
   }
 }
 
@@ -64,21 +73,29 @@ class FakeContainerClient {
   }
 }
 
+function bump(etag: string): string {
+  return String(Number(etag) + 1)
+}
+
+function block(content: string, etag = '1'): BlobRecord {
+  return { kind: 'block', content, etag }
+}
+
 function event(action = 'test_write'): LogEvent {
   return { ts: '2026-06-09T00:00:00.000Z', tool: 'library_write', action }
 }
 
-test('appendLogToContainer migrates legacy block logs to append blobs before writing', async () => {
+test('appendLogToContainer appends to legacy block logs without deleting or migrating them', async () => {
   const container = new FakeContainerClient(new Map<string, BlobRecord>([
-    ['log.jsonl', { kind: 'block', content: '{"ts":"old","tool":"library_write","action":"old"}\n' }],
-    ['log.md', { kind: 'block', content: '# Library Event Log\n\n- old **library_write** — old\n' }]
+    ['log.jsonl', block('{"ts":"old","tool":"library_write","action":"old"}\n')],
+    ['log.md', block('# Library Event Log\n\n- old **library_write** — old\n')]
   ]))
 
   const result = await appendLogToContainer(container as any, event('patch_metadata page.md'))
 
   assert.deepEqual(result, { ok: true })
-  assert.equal(container.store.get('log.jsonl')?.kind, 'append')
-  assert.equal(container.store.get('log.md')?.kind, 'append')
+  assert.equal(container.store.get('log.jsonl')?.kind, 'block')
+  assert.equal(container.store.get('log.md')?.kind, 'block')
   assert.match(container.store.get('log.jsonl')?.content ?? '', /"action":"old"/)
   assert.match(container.store.get('log.jsonl')?.content ?? '', /"action":"patch_metadata page\.md"/)
   assert.match(container.store.get('log.md')?.content ?? '', /- old \*\*library_write\*\* — old/)
