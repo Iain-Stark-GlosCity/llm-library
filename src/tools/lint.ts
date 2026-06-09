@@ -7,6 +7,7 @@ import { readManifest } from '../storage/manifest'
 import { readRawManifest } from '../storage/raw-manifest'
 import { listSchemaDomains, readSchema } from '../storage/schema'
 import { scrollPoints } from '../storage/qdrant'
+import { getConfig } from '../config'
 import { daysSince, inlineSourceIds } from './shared'
 import { computeSourceFreshness } from './freshness'
 import { isOperationalUse, isPageRole } from './governance'
@@ -45,17 +46,32 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
   const pageBlobNames = await listBlobs(wiki, 'pages/')
   const pageFiles = new Set(pageBlobNames.map((n) => n.replace(/^pages\//, '')))
 
-  // Qdrant payload updated timestamps for stale_embedding.
-  const qdrantUpdated = new Map<string, string>()
+  // Qdrant payload updated timestamps for stale_embedding, plus per-filename vector
+  // grouping for the wider vector-hygiene checks (missing/orphan/duplicate/bad payload/
+  // model mismatch) that reconcile_vectors repairs.
   const points = await scrollPoints({
     must: [
       { key: 'record_type', match: { value: 'wiki_page' } },
       { key: 'library_id', match: { value: libraryId } }
     ]
   })
+  const qdrantUpdated = new Map<string, string>()
+  const vectorsByFilename = new Map<string, typeof points>()
   for (const pt of points) {
-    if (pt.payload?.filename) qdrantUpdated.set(pt.payload.filename, pt.payload.updated)
+    if (pt.payload?.filename) {
+      const fn = pt.payload.filename as string
+      qdrantUpdated.set(fn, pt.payload.updated)
+      if (!vectorsByFilename.has(fn)) vectorsByFilename.set(fn, [])
+      vectorsByFilename.get(fn)!.push(pt)
+    }
   }
+  const embeddingModel = getConfig().embeddingModel
+  const RECONCILE_FIX = 'Run library_write operation=reconcile_vectors with mode=reembed_stale'
+  const vectorPayloadComplete = (p: Record<string, any> | undefined): boolean =>
+    !!p && p.record_type === 'wiki_page' && typeof p.library_id === 'string' &&
+    typeof p.filename === 'string' && typeof p.domain === 'string' &&
+    typeof p.confidence === 'string' && typeof p.status === 'string' &&
+    p.updated !== undefined && p.title !== undefined && p.type !== undefined
 
   const pages = manifest.pages.filter((p) => !domainFilter || p.domain === domainFilter)
   const knownSources = new Set(rawManifest.sources.map((s) => s.source_id))
@@ -97,8 +113,55 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
         page: p.filename,
         description: `manifest updated ${p.updated} != Qdrant updated ${qd}`,
         severity: 'warning',
-        suggested_fix: 'Re-run library_update on this page to re-embed and resync the vector.'
+        suggested_fix: RECONCILE_FIX
       })
+    }
+    // Vector-hygiene checks (repaired by reconcile_vectors). Active pages only — drafts and
+    // deprecated pages are not expected to hold a current active vector.
+    if (p.status === 'active') {
+      const hits = vectorsByFilename.get(p.filename) ?? []
+      if (hits.length === 0) {
+        issues.push({
+          type: 'missing_vector',
+          page: p.filename,
+          description: 'active page has no vector in the collection',
+          severity: 'warning',
+          suggested_fix: RECONCILE_FIX
+        })
+      } else {
+        if (hits.length > 1) {
+          issues.push({
+            type: 'duplicate_vector',
+            page: p.filename,
+            description: `active page has ${hits.length} vectors in the collection (expected 1)`,
+            severity: 'warning',
+            suggested_fix: RECONCILE_FIX
+          })
+        }
+        for (const h of hits) {
+          const pl = h.payload as Record<string, any>
+          if (!vectorPayloadComplete(pl)) {
+            issues.push({
+              type: 'bad_payload_vector',
+              page: p.filename,
+              description: 'vector payload is missing required fields',
+              severity: 'warning',
+              suggested_fix: RECONCILE_FIX
+            })
+          }
+          const modelBad = (pl?.embedding_model !== undefined && pl.embedding_model !== embeddingModel) ||
+            (pl?.embedding_dimensions !== undefined && pl.embedding_dimensions !== 1536)
+          if (modelBad) {
+            issues.push({
+              type: 'embedding_model_mismatch',
+              page: p.filename,
+              description: `vector embedding_model/dimensions (${pl?.embedding_model}/${pl?.embedding_dimensions}) do not match the configured model (${embeddingModel}/1536)`,
+              severity: 'warning',
+              suggested_fix: RECONCILE_FIX
+            })
+          }
+        }
+      }
     }
     if (!pageFiles.has(p.filename)) {
       issues.push({
@@ -531,6 +594,25 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
     }
   }
 
+  // Orphan vectors: a vector whose filename has no manifest entry at all. Scoped to the
+  // requested domain (when given) via the vector's own payload domain, so a per-domain
+  // lint never reports another domain's vectors.
+  const manifestFilenames = new Set(manifest.pages.map((p) => p.filename))
+  for (const [fn, hits] of vectorsByFilename) {
+    if (manifestFilenames.has(fn)) continue
+    for (const h of hits) {
+      if (domainFilter && h.payload?.domain !== domainFilter) continue
+      issues.push({
+        type: 'orphan_vector',
+        page: fn,
+        domain: h.payload?.domain,
+        description: `vector for "${fn}" has no manifest entry`,
+        severity: 'warning',
+        suggested_fix: RECONCILE_FIX
+      })
+    }
+  }
+
   const normalizedIssues = issues.map((i) => ({
     ...i,
     code: i.code ?? i.type,
@@ -538,7 +620,36 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
     level: i.level ?? i.severity,
     detail: i.detail ?? i.description
   }))
-  return ok({ issues: normalizedIssues, issue_count: normalizedIssues.length }, [])
+
+  // Categorise issues into three buckets while keeping the flat list for backwards
+  // compatibility. Vector-hygiene issues are repaired by reconcile_vectors; governance
+  // issues by the governance tooling; everything else is structural.
+  const VECTOR_TYPES = new Set([
+    'stale_embedding', 'missing_vector', 'orphan_vector', 'duplicate_vector',
+    'bad_payload_vector', 'embedding_model_mismatch'
+  ])
+  const GOVERNANCE_TYPES = new Set([
+    'operational_use_not_permitted', 'public_guidance_without_last_source_check',
+    'decision_support_without_stale_risk', 'high_risk_page_without_invalidation_policy',
+    'governance_not_adopted', 'active_page_cites_stale_source',
+    'active_page_cites_superseded_source', 'active_page_cites_unchecked_source',
+    'cites_superseded_source', 'source_missing_upstream_id', 'snapshot_aged'
+  ])
+  const isGovernance = (t: string) => t.startsWith('governed_') || GOVERNANCE_TYPES.has(t)
+  const structural_issues = normalizedIssues.filter((i) => !VECTOR_TYPES.has(i.type) && !isGovernance(i.type))
+  const governance_issues = normalizedIssues.filter((i) => isGovernance(i.type))
+  const vector_issues = normalizedIssues.filter((i) => VECTOR_TYPES.has(i.type))
+
+  return ok(
+    {
+      issues: normalizedIssues,
+      issue_count: normalizedIssues.length,
+      structural_issues,
+      governance_issues,
+      vector_issues
+    },
+    []
+  )
 }
 
 export const lintTool: ToolDefinition = {

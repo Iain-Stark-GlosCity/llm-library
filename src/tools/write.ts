@@ -17,6 +17,7 @@ import { setProvenanceTool } from './set-provenance'
 import { patchMetadataTool } from './patch-metadata'
 import { markSourceCheckedTool } from './mark-source-checked'
 import { migrateGovernanceTool } from './migrate-governance'
+import { reconcileVectorsTool } from './reconcile-vectors'
 
 // operation value → the underlying handler that performs it.
 const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
@@ -29,7 +30,8 @@ const OPERATIONS: Record<string, (input: unknown) => Promise<DomainEnvelope>> = 
   delete_blob: deleteBlobTool.handler,
   set_provenance: setProvenanceTool.handler,
   mark_source_checked: markSourceCheckedTool.handler,
-  migrate_governance: migrateGovernanceTool.handler
+  migrate_governance: migrateGovernanceTool.handler,
+  reconcile_vectors: reconcileVectorsTool.handler
 }
 
 // Union of every field used by the underlying operations. Per-operation requirements
@@ -40,7 +42,7 @@ const inputSchema = {
   properties: {
     operation: {
       type: 'string',
-      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked', 'migrate_governance'],
+      enum: ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked', 'migrate_governance', 'reconcile_vectors'],
       description:
         'Which write to perform. "ingest": store+chunk+embed a raw source (needs title, content, ' +
         'source_type). "register_source": register a citable source by metadata only (needs source_id, ' +
@@ -54,7 +56,10 @@ const inputSchema = {
         '(needs container, blob_path, reason) — the irreversible cleanup escape hatch. ' +
         '"set_provenance": set upstream_id/source_url on an existing source (needs source_id) for ' +
         'stale-cache supersession grouping. "mark_source_checked": record upstream revalidation ' +
-        'status on an existing source (needs source_id, upstream_status). "migrate_governance": dry-run or apply governed-domain metadata migration.'
+        'status on an existing source (needs source_id, upstream_status). "migrate_governance": dry-run or apply governed-domain metadata migration. ' +
+        '"reconcile_vectors": reconcile the active wiki vector collection to the manifest for a ' +
+        'domain (needs domain; dry_run defaults true). mode: payload_only | reembed_stale | full_rebuild; ' +
+        'delete_orphans / delete_duplicates / include_deprecated control cleanup of stray vectors.'
     },
 
     // shared / ingest / register_source
@@ -104,6 +109,12 @@ const inputSchema = {
     purge_manifest: { type: 'boolean' },
     force: { type: 'boolean' },
     dry_run: { type: 'boolean' },
+
+    // reconcile_vectors
+    mode: { type: 'string', enum: ['payload_only', 'reembed_stale', 'full_rebuild'] },
+    delete_orphans: { type: 'boolean' },
+    delete_duplicates: { type: 'boolean' },
+    include_deprecated: { type: 'boolean' },
     manual_accept_current: { type: 'boolean' },
     migrated_by: { type: 'string' },
 
@@ -136,8 +147,9 @@ export const writeTool: ToolDefinition = {
     'per-domain schema), "deprecate_page" (soft-retire a page), "delete_blob" (hard-delete a ' +
     'stale Azure object — blob, vector, and registry entry — the irreversible cleanup escape hatch), ' +
     '"set_provenance" (assign upstream_id/source_url to an existing source for stale-cache ' +
-    'supersession grouping), or "mark_source_checked" (record upstream revalidation status ' +
-    'on an existing source).',
+    'supersession grouping), "mark_source_checked" (record upstream revalidation status ' +
+    'on an existing source), or "reconcile_vectors" (reconcile the active wiki vector ' +
+    'collection back to the manifest for a domain — dry_run by default).',
   inputSchema,
   handler: (input) => toEnvelope(() => writeImpl(input))
 }

@@ -96,7 +96,10 @@ const DOCTRINE = {
       '"mark_source_checked" (record last_upstream_check/upstream_status after source revalidation), ' +
       '"migrate_governance" (dry-run by default, or apply: infer page_role and backfill default ' +
       'governance metadata + invalidation policy across a governance_required domain; pass dry_run, ' +
-      'force, manual_accept_current, migrated_by).',
+      'force, manual_accept_current, migrated_by), "reconcile_vectors" (reconcile the active wiki ' +
+      'vector collection back to the manifest for a domain — the manifest is authority, Qdrant is ' +
+      'cache; dry_run by default, mode payload_only | reembed_stale | full_rebuild, with ' +
+      'delete_orphans / delete_duplicates / include_deprecated cleanup of stray vectors).',
     library_update_rules:
       'Layer 1 write (rules-admin endpoint only). Create/overwrite a domain ruleset ' +
       '({domain}.rules.json): ordered rules (first match wins) with a closed predicate `when` ' +
@@ -109,7 +112,11 @@ const DOCTRINE = {
       'governance assurance pass (stable governed_* issue codes) that flags missing page_role, ' +
       'missing allowed_use/prohibited_use, missing business_consequence_if_stale, missing ' +
       'invalidation_policy, missing review metadata, and source/citation mismatches directly — ' +
-      'rather than leaving them to surface indirectly through query permissioning.'
+      'rather than leaving them to surface indirectly through query permissioning. ' +
+      'Results are also bucketed into structural_issues, governance_issues, and vector_issues ' +
+      '(alongside the flat issues[] list). vector_issues — stale_embedding, missing_vector, ' +
+      'orphan_vector, duplicate_vector, bad_payload_vector, embedding_model_mismatch — are repaired ' +
+      'by library_write (operation: reconcile_vectors, mode: reembed_stale).'
   },
 
   synthesis_pages: {
