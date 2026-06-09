@@ -4,7 +4,7 @@
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { getWikiContainer, readBlob } from '../storage/blobs'
 import { readManifest } from '../storage/manifest'
-import { stripFrontmatter } from './shared'
+import { stripFrontmatter, resolveLibraryId } from './shared'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
 
@@ -24,7 +24,7 @@ async function getPageImpl(input: unknown): Promise<DomainEnvelope> {
     throw new DomainException('VALIDATION_ERROR', 'filename must match ^[a-z0-9][a-z0-9-]*\\.md$ and be ≤80 chars')
   }
   const filename: string = a.filename
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   const wiki = await getWikiContainer()
   const blob = await readBlob(wiki, `pages/${filename}`)

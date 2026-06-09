@@ -11,12 +11,16 @@ let schemaInit: Promise<ContainerClient> | null = null
 let rulesInit: Promise<ContainerClient> | null = null
 let rdfInit: Promise<ContainerClient> | null = null
 
+let cachedService: BlobServiceClient | null = null
+
 function serviceClient(): BlobServiceClient {
+  if (cachedService) return cachedService
   const cfg = getConfig()
   if (!cfg.storageConnectionString) {
     throw new DomainException('STORAGE_ERROR', 'LIBRARY_STORAGE_CONNECTION_STRING is not configured')
   }
-  return BlobServiceClient.fromConnectionString(cfg.storageConnectionString)
+  cachedService = BlobServiceClient.fromConnectionString(cfg.storageConnectionString)
+  return cachedService
 }
 
 async function initContainer(name: string): Promise<ContainerClient> {

@@ -10,6 +10,7 @@
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { readRawManifest, writeRawManifest } from '../storage/raw-manifest'
 import { appendLog } from '../storage/log'
+import { resolveLibraryId } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -38,7 +39,7 @@ async function setProvenanceImpl(input: unknown): Promise<DomainEnvelope> {
   }
 
   const sourceId: string = a.source_id
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
   const warnings: string[] = []
 
   const { manifest, etag } = await readRawManifest(libraryId)

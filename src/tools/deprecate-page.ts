@@ -9,6 +9,7 @@ import { regenerateIndex } from '../storage/index'
 import { appendLog } from '../storage/log'
 import { ensureCollection, setPayload } from '../storage/qdrant'
 import { wikiPagePointId } from '../embed/ids'
+import { resolveLibraryId, renderFrontmatter, stripFrontmatter } from './shared'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
 
@@ -23,18 +24,6 @@ const inputSchema = {
   additionalProperties: false
 }
 
-function replaceOrInsertFrontmatterLine(content: string, key: string, value: string): string {
-  if (!content.startsWith('---')) return content
-  const end = content.indexOf('\n---', 3)
-  if (end < 0) return content
-  const frontmatter = content.slice(0, end)
-  const rest = content.slice(end)
-  const line = `${key}: ${value}`
-  const re = new RegExp(`^${key}:\\s*.*$`, 'm')
-  if (re.test(frontmatter)) return content.replace(re, line)
-  return `${frontmatter}\n${line}${rest}`
-}
-
 async function deprecatePageImpl(input: unknown): Promise<DomainEnvelope> {
   const a = (input ?? {}) as Record<string, any>
   if (typeof a.filename !== 'string' || !FILENAME_RE.test(a.filename) || a.filename.length > 80) {
@@ -46,7 +35,7 @@ async function deprecatePageImpl(input: unknown): Promise<DomainEnvelope> {
 
   const filename: string = a.filename
   const reason: string = a.reason.trim()
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
   const nowIso = new Date().toISOString()
   const warnings: string[] = []
 
@@ -59,9 +48,13 @@ async function deprecatePageImpl(input: unknown): Promise<DomainEnvelope> {
   const existing = await readBlob(wiki, pagePath)
   if (!existing) throw new DomainException('NOT_FOUND', `page blob not found: ${filename}`)
 
-  let updatedContent = replaceOrInsertFrontmatterLine(existing.content, 'status', 'deprecated')
-  updatedContent = replaceOrInsertFrontmatterLine(updatedContent, 'updated', nowIso)
-  updatedContent = `${updatedContent.trimEnd()}\n\n<!-- deprecated: ${reason.replace(/-->/g, '--&gt;')} -->\n`
+  // Re-render the full frontmatter from the manifest entry (the authority) instead of
+  // regex-patching individual lines — the same structured path every other writer uses,
+  // so a frontmatter format change cannot silently break this tool.
+  const entry = { ...manifest.pages[idx], status: 'deprecated', updated: nowIso }
+  const frontmatter = renderFrontmatter(entry)
+  const body = stripFrontmatter(existing.content)
+  const updatedContent = `${frontmatter}\n\n${body.trimEnd()}\n\n<!-- deprecated: ${reason.replace(/-->/g, '--&gt;')} -->\n`
 
   const write = await conditionalWrite(wiki, pagePath, updatedContent, existing.etag, 'text/markdown; charset=utf-8')
   if (write.conflict) throw new DomainException('CONFLICT', `ETag conflict writing ${filename}; caller should retry`)
@@ -76,7 +69,7 @@ async function deprecatePageImpl(input: unknown): Promise<DomainEnvelope> {
     warnings.push('history_write_failed')
   }
 
-  manifest.pages[idx] = { ...manifest.pages[idx], status: 'deprecated', updated: nowIso }
+  manifest.pages[idx] = entry
   const mw = await writeManifest(manifest, etag)
   let manifestUpdated = false
   let indexUpdated = false
@@ -100,7 +93,7 @@ async function deprecatePageImpl(input: unknown): Promise<DomainEnvelope> {
     await setPayload([wikiPagePointId(libraryId, filename)], { status: 'deprecated', updated: nowIso })
     vector_payload_updated = true
   } catch (err) {
-    warnings.push('vector_payload_update_failed', (err as Error).message)
+    warnings.push(`vector_payload_update_failed: ${(err as Error).message}`)
   }
 
   const log = await appendLog({

@@ -5,6 +5,7 @@
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { readRawManifest, writeRawManifest } from '../storage/raw-manifest'
 import { appendLog } from '../storage/log'
+import { resolveLibraryId } from './shared'
 
 type UpstreamStatus = 'current' | 'superseded' | 'unavailable' | 'unknown'
 type CheckMethod = 'manual' | 'web_fetch' | 'legislation_api' | 'system'
@@ -73,7 +74,7 @@ async function markSourceCheckedImpl(input: unknown): Promise<DomainEnvelope> {
   const lastUpstreamCheck = parseCheckTime(a.last_upstream_check)
   const checkedBy = typeof a.checked_by === 'string' && a.checked_by ? a.checked_by : 'unknown'
   const notes = typeof a.notes === 'string' ? a.notes : ''
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
   const warnings: string[] = []
 
   const { manifest, etag } = await readRawManifest(libraryId)

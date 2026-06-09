@@ -14,7 +14,7 @@ import { ensureCollection, hybridQuery, QdrantHit } from '../storage/qdrant'
 import { embed } from '../embed/openai'
 import { chunkText } from '../embed/chunk'
 import { sparseVector, STOPWORDS } from '../embed/sparse'
-import { stripFrontmatter } from './shared'
+import { stripFrontmatter, resolveLibraryId } from './shared'
 
 const GAP_QUERY_WORDS = new Set([
   'about',
@@ -118,15 +118,14 @@ interface GapResultEvidence {
   source_id?: string
 }
 
-async function detectGaps(
+function detectGaps(
   question: string,
-  libraryId: string,
+  manifestPages: Pick<PageEntry, 'title' | 'domain' | 'tags'>[],
   resultEvidence: GapResultEvidence[] = []
-): Promise<string[]> {
-  const { manifest } = await readManifest(libraryId)
+): string[] {
   const known = new Set<string>()
   const add = (s: string) => addGapEvidenceTokens(known, s)
-  for (const p of manifest.pages) {
+  for (const p of manifestPages) {
     add(p.title)
     add(p.domain)
     for (const t of p.tags || []) add(t)
@@ -169,7 +168,7 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
     ? a.min_confidence
     : 'low'
   const includeDeprecated = a.include_deprecated === true
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   // Answer mode (C). When the caller declares intended_use, results carry a per-result
   // use_permitted decision; an OPERATIONAL intent is blocked outright — the library is
@@ -255,13 +254,14 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
   // Governed-answer envelope. Each curated result carries provenance (cited sources with
   // owner/url/capture date, page review + permitted-use governance) and a currency
   // (freshness) signal independent of confidence. All read from manifest + raw_manifest;
-  // governance metadata never lives in the vector. Only needed when wiki pages can appear.
+  // governance metadata never lives in the vector. The manifest is read once here and
+  // shared with gap detection below.
   const wantWiki = scope === 'wiki' || scope === 'both'
+  const { manifest } = await readManifest(libraryId)
   const pageEntries = new Map<string, PageEntry>()
   const sourceMeta = new Map<string, SourceEntry>()
   let sourceFreshness = new Map<string, SourceFreshness>()
   if (wantWiki) {
-    const { manifest } = await readManifest(libraryId)
     for (const pg of manifest.pages) pageEntries.set(pg.filename, pg)
     const { manifest: rawManifest } = await readRawManifest(libraryId)
     for (const s of rawManifest.sources) sourceMeta.set(s.source_id, s)
@@ -295,16 +295,25 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
     }
   }
 
-  // Fetch content from blob storage for each result.
+  // Fetch content from blob storage for each result — in parallel; results stay in
+  // score order because Promise.all preserves input order.
   const wiki = await getWikiContainer()
   const raw = await getRawContainer()
+  const blobs = await Promise.all(
+    top.map((h) =>
+      h.payload.record_type === 'wiki_page'
+        ? readBlob(wiki, `pages/${h.payload.filename}`)
+        : readBlob(raw, h.payload.source_id)
+    )
+  )
   const results: unknown[] = []
   const gapEvidence: GapResultEvidence[] = []
   let usePermittedCount = 0
-  for (const h of top) {
+  for (let i = 0; i < top.length; i++) {
+    const h = top[i]
+    const blob = blobs[i]
     const p = h.payload
     if (p.record_type === 'wiki_page') {
-      const blob = await readBlob(wiki, `pages/${p.filename}`)
       const entry = pageEntries.get(p.filename)
       const freshness = computePageFreshness(entry?.sources || [], sourceFreshness)
       const result: Record<string, unknown> = {
@@ -344,7 +353,6 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
         tags: Array.isArray(p.tags) ? p.tags : []
       })
     } else {
-      const blob = await readBlob(raw, p.source_id)
       const chunk = blob ? chunkText(blob.content)[p.chunk_index] ?? '' : ''
       const result: Record<string, unknown> = {
         type: 'raw_chunk',
@@ -372,7 +380,7 @@ async function queryImpl(input: unknown): Promise<DomainEnvelope> {
     }
   }
 
-  const gaps = await detectGaps(question, libraryId, gapEvidence)
+  const gaps = detectGaps(question, manifest.pages, gapEvidence)
   const queryId = randomUUID()
 
   const log = await appendLog({

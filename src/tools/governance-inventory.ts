@@ -4,6 +4,7 @@ import { readRawManifest } from '../storage/raw-manifest'
 import { readSchema } from '../storage/schema'
 import { computeSourceFreshness, computePageFreshness } from './freshness'
 import { governanceStatusForUse, evaluateUse, OPERATIONAL_USE_MODES } from './governance'
+import { resolveLibraryId } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -16,7 +17,7 @@ async function governanceInventoryImpl(input: unknown): Promise<DomainEnvelope> 
   const a = (input ?? {}) as Record<string, any>
   if (typeof a.domain !== 'string' || !a.domain) throw new DomainException('VALIDATION_ERROR', 'domain is required')
   const domain: string = a.domain
-  const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
   const [{ manifest }, { manifest: rawManifest }, schema] = await Promise.all([
     readManifest(libraryId),
     readRawManifest(libraryId),

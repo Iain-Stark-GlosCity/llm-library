@@ -1,0 +1,40 @@
+# PR / branch CI: build, unit tests, entrypoint smoke check, and the offline sovereign
+# verification (L1 rule firing + L3 reasoning under both RDF engines). Deploys happen
+# only from main via main_func-stark-library.yml; this workflow never deploys.
+# ubuntu-latest is fine here — oxigraph ships Linux prebuilds and nothing in CI talks to
+# Azure/Qdrant/OpenAI (the tests are pure).
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches-ignore:
+      - main
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v3
+        with:
+          node-version: '20.x'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Entrypoint smoke check
+        run: node scripts/verify-functions-entrypoint.js
+
+      - name: Sovereign layer verification (offline)
+        run: node scripts/verify-sovereign.js

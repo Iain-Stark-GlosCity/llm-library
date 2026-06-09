@@ -3,6 +3,7 @@
 
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { readManifest } from '../storage/manifest'
+import { resolveLibraryId } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -21,7 +22,7 @@ async function listPagesImpl(input: unknown): Promise<DomainEnvelope> {
   if (status !== undefined && !['draft', 'active', 'deprecated'].includes(status)) {
     throw new DomainException('VALIDATION_ERROR', 'status must be draft | active | deprecated')
   }
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   const { manifest } = await readManifest(libraryId)
   const pages = manifest.pages

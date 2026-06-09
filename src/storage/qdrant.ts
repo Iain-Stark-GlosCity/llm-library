@@ -4,6 +4,11 @@
 import { getConfig } from '../config'
 import { DomainException } from '../types'
 import { SparseVector } from '../embed/sparse'
+import { fetchWithRetry } from '../http'
+
+// All Qdrant calls here are idempotent (PUT upsert by stable id, POST query/scroll/
+// delete/setPayload), so a single network-level retry with a timeout is safe.
+const TIMEOUT_MS = 30_000
 
 export interface QdrantPoint {
   id: string
@@ -39,7 +44,7 @@ async function verifyCollection(): Promise<void> {
   const { url, collection, apiKey } = conn()
   let resp: Response
   try {
-    resp = await fetch(`${url}/collections/${collection}`, { headers: headers(apiKey) })
+    resp = await fetchWithRetry(`${url}/collections/${collection}`, { headers: headers(apiKey) }, { timeoutMs: TIMEOUT_MS })
   } catch (err) {
     throw new DomainException('STORAGE_ERROR', `Qdrant unreachable: ${(err as Error).message}`)
   }
@@ -79,11 +84,11 @@ export function ensureCollection(): Promise<void> {
 export async function upsertPoints(points: QdrantPoint[]): Promise<void> {
   if (points.length === 0) return
   const { url, collection, apiKey } = conn()
-  const resp = await fetch(`${url}/collections/${collection}/points?wait=true`, {
+  const resp = await fetchWithRetry(`${url}/collections/${collection}/points?wait=true`, {
     method: 'PUT',
     headers: headers(apiKey),
     body: JSON.stringify({ points })
-  })
+  }, { timeoutMs: TIMEOUT_MS })
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
     throw new DomainException('STORAGE_ERROR', `Qdrant upsert failed: ${resp.status} ${text}`)
@@ -128,11 +133,11 @@ export async function hybridQuery(opts: {
 
   if (opts.filter) body.filter = opts.filter
 
-  const resp = await fetch(`${url}/collections/${collection}/points/query`, {
+  const resp = await fetchWithRetry(`${url}/collections/${collection}/points/query`, {
     method: 'POST',
     headers: headers(apiKey),
     body: JSON.stringify(body)
-  })
+  }, { timeoutMs: TIMEOUT_MS })
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
     throw new DomainException('STORAGE_ERROR', `Qdrant query failed: ${resp.status} ${text}`)
@@ -148,11 +153,11 @@ export async function scrollPoints(filter: unknown, limit = 100): Promise<Qdrant
   const all: QdrantHit[] = []
   let offset: unknown = null
   do {
-    const resp = await fetch(`${url}/collections/${collection}/points/scroll`, {
+    const resp = await fetchWithRetry(`${url}/collections/${collection}/points/scroll`, {
       method: 'POST',
       headers: headers(apiKey),
       body: JSON.stringify({ filter, with_payload: true, limit, offset })
-    })
+    }, { timeoutMs: TIMEOUT_MS })
     if (!resp.ok) {
       const text = await resp.text().catch(() => '')
       throw new DomainException('STORAGE_ERROR', `Qdrant scroll failed: ${resp.status} ${text}`)
@@ -171,11 +176,11 @@ export async function scrollPoints(filter: unknown, limit = 100): Promise<Qdrant
 export async function deletePoints(points: Array<string | number>): Promise<void> {
   if (points.length === 0) return
   const { url, collection, apiKey } = conn()
-  const resp = await fetch(`${url}/collections/${collection}/points/delete?wait=true`, {
+  const resp = await fetchWithRetry(`${url}/collections/${collection}/points/delete?wait=true`, {
     method: 'POST',
     headers: headers(apiKey),
     body: JSON.stringify({ points })
-  })
+  }, { timeoutMs: TIMEOUT_MS })
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
     throw new DomainException('STORAGE_ERROR', `Qdrant delete failed: ${resp.status} ${text}`)
@@ -185,11 +190,11 @@ export async function deletePoints(points: Array<string | number>): Promise<void
 export async function setPayload(points: Array<string | number>, payload: Record<string, unknown>): Promise<void> {
   if (points.length === 0) return
   const { url, collection, apiKey } = conn()
-  const resp = await fetch(`${url}/collections/${collection}/points/payload?wait=true`, {
+  const resp = await fetchWithRetry(`${url}/collections/${collection}/points/payload?wait=true`, {
     method: 'POST',
     headers: headers(apiKey),
     body: JSON.stringify({ points, payload })
-  })
+  }, { timeoutMs: TIMEOUT_MS })
   if (!resp.ok) {
     const text = await resp.text().catch(() => '')
     throw new DomainException('STORAGE_ERROR', `Qdrant payload update failed: ${resp.status} ${text}`)

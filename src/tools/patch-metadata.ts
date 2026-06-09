@@ -19,7 +19,7 @@ import { regenerateIndex } from '../storage/index'
 import { appendLog } from '../storage/log'
 import { ensureCollection, setPayload } from '../storage/qdrant'
 import { wikiPagePointId } from '../embed/ids'
-import { renderFrontmatter, stripFrontmatter } from './shared'
+import { renderFrontmatter, stripFrontmatter, resolveLibraryId } from './shared'
 import { isUseMode, isOperationalUse, isPageRole, PAGE_ROLES } from './governance'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
@@ -80,7 +80,7 @@ async function patchMetadataImpl(input: unknown): Promise<DomainEnvelope> {
     throw new DomainException('VALIDATION_ERROR', 'filename must match ^[a-z0-9][a-z0-9-]*\\.md$ and be ≤80 chars')
   }
   const filename: string = a.filename
-  const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   const provided = PATCHABLE.filter((k) => a[k] !== undefined)
   if (provided.length === 0) {

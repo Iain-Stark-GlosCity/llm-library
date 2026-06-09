@@ -8,7 +8,7 @@ import { readRawManifest } from '../storage/raw-manifest'
 import { listSchemaDomains, readSchema } from '../storage/schema'
 import { scrollPoints } from '../storage/qdrant'
 import { getConfig } from '../config'
-import { daysSince, inlineSourceIds } from './shared'
+import { daysSince, inlineSourceIds, resolveLibraryId } from './shared'
 import { computeSourceFreshness } from './freshness'
 import { isOperationalUse, isPageRole } from './governance'
 
@@ -38,7 +38,7 @@ const inputSchema = {
 async function lintImpl(input: unknown): Promise<DomainEnvelope> {
   const a = (input ?? {}) as Record<string, any>
   const domainFilter = typeof a.domain === 'string' && a.domain ? a.domain : undefined
-  const libraryId = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   const { manifest } = await readManifest(libraryId)
   const { manifest: rawManifest } = await readRawManifest(libraryId)
@@ -55,12 +55,10 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
       { key: 'library_id', match: { value: libraryId } }
     ]
   })
-  const qdrantUpdated = new Map<string, string>()
   const vectorsByFilename = new Map<string, typeof points>()
   for (const pt of points) {
     if (pt.payload?.filename) {
       const fn = pt.payload.filename as string
-      qdrantUpdated.set(fn, pt.payload.updated)
       if (!vectorsByFilename.has(fn)) vectorsByFilename.set(fn, [])
       vectorsByFilename.get(fn)!.push(pt)
     }
@@ -85,6 +83,20 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
 
   const issues: LintIssue[] = []
 
+  // Page bodies are needed by both the citation/contradiction checks and the governed-
+  // domain checks below. Fetch each body at most once, in parallel, instead of one
+  // serial read per page per check block.
+  const bodyCache = new Map<string, string>()
+  const needsBodyPages = pages.filter(
+    (p) => p.status === 'active' || p.confidence === 'high' || p.type === 'contradiction'
+  )
+  await Promise.all(
+    needsBodyPages.map(async (p) => {
+      const blob = await readBlob(wiki, `pages/${p.filename}`)
+      bodyCache.set(p.filename, blob?.content ?? '')
+    })
+  )
+
   for (const p of pages) {
     for (const r of p.related || []) {
       if (!allFilenames.has(r)) {
@@ -106,12 +118,15 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
         suggested_fix: 'Review the page, add/confirm sources, and raise confidence — or deprecate it.'
       })
     }
-    const qd = qdrantUpdated.get(p.filename)
-    if (qd !== undefined && qd !== p.updated) {
+    // Stale when the page has vectors but NONE carries the manifest's updated timestamp.
+    // (Comparing a single arbitrary vector made this flap with scroll order when a page
+    // had duplicates — duplicate_vector below reports that case explicitly.)
+    const fnHits = vectorsByFilename.get(p.filename) ?? []
+    if (fnHits.length > 0 && !fnHits.some((h) => h.payload?.updated === p.updated)) {
       issues.push({
         type: 'stale_embedding',
         page: p.filename,
-        description: `manifest updated ${p.updated} != Qdrant updated ${qd}`,
+        description: `manifest updated ${p.updated} != Qdrant updated ${fnHits.map((h) => h.payload?.updated).join(', ')}`,
         severity: 'warning',
         suggested_fix: RECONCILE_FIX
       })
@@ -244,11 +259,8 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
   }
 
   // Content-fetch checks: inline source integrity (active/high confidence) and open_contradiction.
-  for (const p of pages) {
-    const needsBody = p.status === 'active' || p.confidence === 'high' || p.type === 'contradiction'
-    if (!needsBody) continue
-    const blob = await readBlob(wiki, `pages/${p.filename}`)
-    const body = blob?.content ?? ''
+  for (const p of needsBodyPages) {
+    const body = bodyCache.get(p.filename) ?? ''
     const inlineSources = inlineSourceIds(body)
     const metadataSources = new Set(p.sources || [])
     if (p.status === 'active' && inlineSources.length === 0) {
@@ -434,8 +446,8 @@ async function lintImpl(input: unknown): Promise<DomainEnvelope> {
       if (!p.reviewed_by || !p.reviewed_at) pushGov('governed_page_missing_review_metadata', 'warning', 'governed active page is missing reviewed_by or reviewed_at', 'Set reviewed_by and reviewed_at after review.')
       if ((p.sources || []).length === 0) pushGov('governed_page_missing_source_metadata', 'error', 'governed active page has no sources[] metadata', 'Add at least one registered source_id to sources[].')
 
-      const blob = await readBlob(wiki, `pages/${p.filename}`)
-      const body = blob?.content ?? ''
+      // Governed pages are active, so the body is already in the prefetched cache.
+      const body = bodyCache.get(p.filename) ?? ''
       const inlineSources = inlineSourceIds(body)
       const inlineSet = new Set(inlineSources)
       const metadataSet = new Set(p.sources || [])

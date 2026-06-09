@@ -13,10 +13,13 @@ import { ensureCollection, upsertPoints, QdrantPoint } from '../storage/qdrant'
 import { embed } from '../embed/openai'
 import { wikiPagePointId } from '../embed/ids'
 import { sparseVector } from '../embed/sparse'
-import { renderFrontmatter, extractCreated, inlineSourceIds, assertValidDomain } from './shared'
+import { renderFrontmatter, extractCreated, inlineSourceIds, assertValidDomain, resolveLibraryId } from './shared'
 import { isUseMode, isOperationalUse, isPageRole, PAGE_ROLES } from './governance'
 
 const FILENAME_RE = /^[a-z0-9][a-z0-9-]*\.md$/
+
+// Cap on the dense-embedding input (see step 7) — keeps within the model's 8,192-token limit.
+const EMBED_MAX_CHARS = 24_000
 
 const inputSchema = {
   type: 'object',
@@ -107,7 +110,7 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   }
   const sources: string[] = a.sources ?? []
   const related: string[] = a.related ?? []
-  const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   if (reviewAfter && Number.isNaN(Date.parse(reviewAfter))) {
     throw new DomainException('VALIDATION_ERROR', 'review_after must be an ISO date or timestamp')
@@ -206,9 +209,23 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
     if (ec) created = ec
   }
 
-  // 4–6. Compose full page and write with ETag conditional. This is the critical write.
-  // History is written after the conditional page write succeeds; otherwise an ETag
-  // conflict would leave a misleading archived version for an update that did not land.
+  // 4. Archive the previous version BEFORE the page write (CLAUDE.md step order). If the
+  // conditional page write later conflicts, the orphan history copy is harmless; the
+  // reverse ordering had a crash window between page write and history write that lost
+  // the previous version irrecoverably.
+  if (existing) {
+    const slug = filename.replace(/\.md$/, '')
+    const safeTs = nowIso.replace(/:/g, '-')
+    const histPath = `history/${slug}/${safeTs}.md`
+    try {
+      await writeBlob(wiki, histPath, existing.content)
+      previousVersionPath = histPath
+    } catch {
+      warnings.push('history_write_failed')
+    }
+  }
+
+  // 5–6. Compose full page and write with ETag conditional. This is the critical write.
   const frontmatter = renderFrontmatter({
     title,
     type: pageType,
@@ -237,24 +254,17 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
   if (w.conflict) throw new DomainException('CONFLICT', `ETag conflict writing ${filename}; caller should retry`)
   if (!w.success) throw new DomainException('STORAGE_ERROR', `Failed to write ${filename}`)
 
-  if (existing) {
-    const slug = filename.replace(/\.md$/, '')
-    const safeTs = nowIso.replace(/:/g, '-')
-    const histPath = `history/${slug}/${safeTs}.md`
-    try {
-      await writeBlob(wiki, histPath, existing.content)
-      previousVersionPath = histPath
-    } catch {
-      warnings.push('history_write_failed')
-    }
-  }
-
   // 7. Embed + upsert wiki_page vector. Failure = warning only.
+  // The dense input is capped: text-embedding-3-small rejects inputs over 8,192 tokens,
+  // so an uncapped 50k-char body would make embedding fail deterministically on every
+  // update. ~24k chars ≈ 6k tokens leaves headroom; the sparse vector has no such limit
+  // and keeps full-text keyword coverage.
   let embedded = false
   let embeddingStatus: 'ok' | 'failed' = 'ok'
   try {
     await ensureCollection()
-    const [vec] = await embed(`${title}\n${summary}\n\n${content}`)
+    const denseInput = `${title}\n${summary}\n\n${content}`.slice(0, EMBED_MAX_CHARS)
+    const [vec] = await embed(denseInput)
     const point: QdrantPoint = {
       id: wikiPagePointId(libraryId, filename),
       vector: { default: vec, text: sparseVector(`${title} ${summary} ${content}`) },
@@ -275,7 +285,7 @@ async function updateImpl(input: unknown): Promise<DomainEnvelope> {
     embedded = true
   } catch (err) {
     embeddingStatus = 'failed'
-    warnings.push('embedding_failed', (err as Error).message)
+    warnings.push(`embedding_failed: ${(err as Error).message}`)
   }
 
   // 8–9. Update manifest.json then regenerate index.md. ETag-aware; warnings only.

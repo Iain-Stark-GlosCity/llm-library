@@ -12,7 +12,7 @@ import { chunkText } from '../embed/chunk'
 import { rawChunkPointId } from '../embed/ids'
 import { sparseVector } from '../embed/sparse'
 import { getConfig } from '../config'
-import { sha256, slugify } from './shared'
+import { sha256, slugify, resolveLibraryId, assertValidDomain } from './shared'
 
 const inputSchema = {
   type: 'object',
@@ -52,8 +52,11 @@ async function ingestImpl(input: unknown): Promise<DomainEnvelope> {
   const sourceUrl: string = typeof a.source_url === 'string' ? a.source_url : ''
   const upstreamId: string = typeof a.upstream_id === 'string' ? a.upstream_id : ''
   const upstreamOwner: string = typeof a.upstream_owner === 'string' ? a.upstream_owner : ''
-  const domain: string = typeof a.domain === 'string' ? a.domain : ''
-  const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  // Validate domain when provided (optional here, unlike library_update). Without this,
+  // raw chunks could carry a domain string the wiki layer rejects, and Qdrant domain
+  // filters would silently never match them.
+  const domain: string = typeof a.domain === 'string' && a.domain ? assertValidDomain(a.domain) : ''
+  const libraryId = resolveLibraryId(a)
 
   const warnings: string[] = []
   const now = new Date()
@@ -115,7 +118,7 @@ async function ingestImpl(input: unknown): Promise<DomainEnvelope> {
     embedded = true
   } catch (err) {
     embeddingStatus = 'failed'
-    warnings.push('embedding_failed', (err as Error).message)
+    warnings.push(`embedding_failed: ${(err as Error).message}`)
   }
 
   // 7. Update raw_manifest.json (ETag-aware). Never fail after the critical write.

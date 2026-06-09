@@ -6,6 +6,7 @@
 import { DomainEnvelope, DomainException, ToolDefinition, ok, toEnvelope } from '../types'
 import { readRawManifest, writeRawManifest, SourceEntry } from '../storage/raw-manifest'
 import { appendLog } from '../storage/log'
+import { resolveLibraryId } from './shared'
 
 // Friendly ids are allowed (e.g. "claude-build-13"), as well as the ingest id form
 // "2026/05/slug-hash.md". Keep it to safe path/identifier characters.
@@ -46,7 +47,7 @@ async function registerSourceImpl(input: unknown): Promise<DomainEnvelope> {
   const sourceUrl: string = typeof a.source_url === 'string' ? a.source_url : ''
   const upstreamId: string = typeof a.upstream_id === 'string' ? a.upstream_id : ''
   const upstreamOwner: string = typeof a.upstream_owner === 'string' ? a.upstream_owner : ''
-  const libraryId: string = typeof a.library_id === 'string' && a.library_id ? a.library_id : 'default'
+  const libraryId = resolveLibraryId(a)
 
   const warnings: string[] = []
   const { manifest, etag } = await readRawManifest(libraryId)
