@@ -6,7 +6,7 @@
 import { Condition, LeafCondition, RuleSet } from '../storage/rules'
 
 export interface EligibilityResult {
-  eligibility: 'eligible' | 'ineligible' | 'indeterminate'
+  eligibility: 'eligible' | 'ineligible' | 'indeterminate' | 'local_policy_required'
   rule_fired: string | null
   reason_code: string
   ruleset_version: string

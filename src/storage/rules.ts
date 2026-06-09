@@ -25,7 +25,7 @@ export interface LeafCondition {
 }
 
 export interface RuleOutcome {
-  eligibility: 'eligible' | 'ineligible' | 'indeterminate'
+  eligibility: 'eligible' | 'ineligible' | 'indeterminate' | 'local_policy_required'
   reason_code: string
   // Optional links to Layer 3 nodes this outcome points at (answer-shape refs etc.).
   governs?: string[]

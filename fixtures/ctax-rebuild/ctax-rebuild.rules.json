@@ -1,16 +1,168 @@
 {
   "domain": "ctax-rebuild",
-  "version": "2026-06-05.1",
+  "version": "2026-06-09.1",
   "input_schema": {
     "type": "object",
-    "required": ["liable_occupier"],
     "properties": {
       "liable_occupier": { "type": "boolean" },
       "low_income": { "type": "boolean" },
-      "in_arrears": { "type": "boolean" }
+      "in_arrears": { "type": "boolean" },
+      "adult_count": {
+        "type": "object",
+        "properties": {
+          "counted_adults": { "type": "number" }
+        }
+      },
+      "person": {
+        "type": "object",
+        "properties": {
+          "smi_disregard_criteria_met": { "type": "boolean" },
+          "student_disregard_criteria_met": { "type": "boolean" }
+        }
+      },
+      "dwelling": {
+        "type": "object",
+        "properties": {
+          "class_n_conditions_met": { "type": "boolean" },
+          "disabled_reduction_gateway_met": { "type": "boolean" }
+        }
+      },
+      "liability": {
+        "type": "object",
+        "properties": {
+          "hmo": { "type": "boolean" },
+          "owner": { "type": "boolean" }
+        }
+      },
+      "local_policy": {
+        "type": "object",
+        "properties": {
+          "empty_property_premium_slot": { "type": "boolean" },
+          "second_home_premium_slot": { "type": "boolean" },
+          "local_discount_class_slot": { "type": "boolean" },
+          "discretionary_reduction_slot": { "type": "boolean" }
+        }
+      },
+      "ctr": {
+        "type": "object",
+        "properties": {
+          "working_age_scheme_slot": { "type": "boolean" }
+        }
+      }
     }
   },
   "rules": [
+    {
+      "id": "CTAX-SPD-001",
+      "description": "Single adult discount gateway: exactly one counted adult.",
+      "when": { "op": "eq", "path": "adult_count.counted_adults", "value": 1 },
+      "outcome": {
+        "eligibility": "eligible",
+        "reason_code": "single_adult_discount_25_percent",
+        "governs": ["SinglePersonDiscountShape"]
+      }
+    },
+    {
+      "id": "CTAX-SPD-002",
+      "description": "Single adult discount fails when more than one adult is counted.",
+      "when": { "op": "gt", "path": "adult_count.counted_adults", "value": 1 },
+      "outcome": { "eligibility": "ineligible", "reason_code": "more_than_one_counted_adult" }
+    },
+    {
+      "id": "CTAX-DISREGARD-SMI-001",
+      "description": "Severely mentally impaired person disregard gateway.",
+      "when": { "op": "eq", "path": "person.smi_disregard_criteria_met", "value": true },
+      "outcome": {
+        "eligibility": "eligible",
+        "reason_code": "smi_disregard_gateway",
+        "governs": ["DisregardShape"]
+      }
+    },
+    {
+      "id": "CTAX-DISREGARD-STUDENT-001",
+      "description": "Student disregard gateway.",
+      "when": { "op": "eq", "path": "person.student_disregard_criteria_met", "value": true },
+      "outcome": {
+        "eligibility": "eligible",
+        "reason_code": "student_disregard_gateway",
+        "governs": ["DisregardShape"]
+      }
+    },
+    {
+      "id": "CTAX-EXEMPT-CLASS-N-001",
+      "description": "Exempt dwelling Class N gateway.",
+      "when": { "op": "eq", "path": "dwelling.class_n_conditions_met", "value": true },
+      "outcome": {
+        "eligibility": "eligible",
+        "reason_code": "exempt_dwelling_class_n",
+        "governs": ["ExemptionShape"]
+      }
+    },
+    {
+      "id": "CTAX-DISABLED-REDUCTION-001",
+      "description": "Disabled reduction gateway.",
+      "when": { "op": "eq", "path": "dwelling.disabled_reduction_gateway_met", "value": true },
+      "outcome": {
+        "eligibility": "eligible",
+        "reason_code": "disabled_reduction_gateway",
+        "governs": ["ReductionShape"]
+      }
+    },
+    {
+      "id": "CTAX-LIABILITY-HMO-001",
+      "description": "Owner liability gateway for HMO cases.",
+      "when": {
+        "all": [
+          { "op": "eq", "path": "liability.hmo", "value": true },
+          { "op": "eq", "path": "liability.owner", "value": true }
+        ]
+      },
+      "outcome": {
+        "eligibility": "eligible",
+        "reason_code": "owner_liability_hmo",
+        "governs": ["LiabilityShape"]
+      }
+    },
+    {
+      "id": "CTAX-PREMIUM-EMPTY-LOCAL-001",
+      "description": "Empty-property premium slot requires the local policy layer.",
+      "when": { "op": "eq", "path": "local_policy.empty_property_premium_slot", "value": true },
+      "outcome": {
+        "eligibility": "local_policy_required",
+        "reason_code": "empty_property_premium_local_policy_required",
+        "governs": ["LocalPolicyPremiumShape"]
+      }
+    },
+    {
+      "id": "CTAX-PREMIUM-SECOND-HOME-LOCAL-001",
+      "description": "Second-home premium slot requires the local policy layer.",
+      "when": { "op": "eq", "path": "local_policy.second_home_premium_slot", "value": true },
+      "outcome": {
+        "eligibility": "local_policy_required",
+        "reason_code": "second_home_premium_local_policy_required",
+        "governs": ["LocalPolicyPremiumShape"]
+      }
+    },
+    {
+      "id": "CTAX-LOCAL-DISCOUNT-LOCAL-001",
+      "description": "Local discount class slot requires the local policy layer.",
+      "when": { "op": "eq", "path": "local_policy.local_discount_class_slot", "value": true },
+      "outcome": {
+        "eligibility": "local_policy_required",
+        "reason_code": "local_discount_class_policy_required",
+        "governs": ["LocalPolicyDiscountShape"]
+      }
+    },
+    {
+      "id": "CTAX-CTR-WORKING-AGE-LOCAL-001",
+      "description": "Working-age CTR scheme slot requires the local CTR policy layer.",
+      "when": { "op": "eq", "path": "ctr.working_age_scheme_slot", "value": true },
+      "outcome": {
+        "eligibility": "local_policy_required",
+        "reason_code": "ctr_working_age_scheme_local_policy_required",
+        "governs": ["LocalCtrSchemeShape"]
+      }
+    },
     {
       "id": "CTR-002",
       "description": "Not the liable council-tax occupier: council-tax-rebuild support does not apply.",
@@ -34,5 +186,5 @@
       }
     }
   ],
-  "default_outcome": { "eligibility": "indeterminate", "reason_code": "no_rule_fired" }
+  "default_outcome": { "eligibility": "indeterminate", "reason_code": "insufficient_facts" }
 }

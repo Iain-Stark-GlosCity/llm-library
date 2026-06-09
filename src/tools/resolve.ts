@@ -36,6 +36,72 @@ const inputSchema = {
   additionalProperties: false
 }
 
+
+type ResolverContextResult = Record<string, any>
+
+function normalizedText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function resultDescriptor(result: ResolverContextResult): string {
+  const tags = Array.isArray(result.tags) ? result.tags.join(' ') : ''
+  return [result.filename, result.title, tags].filter((v) => typeof v === 'string' && v).join(' ')
+}
+
+function containsConfiguredPattern(text: string, patterns: string[]): boolean {
+  const normalized = normalizedText(text)
+  return patterns.some((pattern) => {
+    if (typeof pattern !== 'string' || !pattern.trim()) return false
+    return normalized.includes(normalizedText(pattern))
+  })
+}
+
+export function shouldSuppressByReasoningFilters(result: ResolverContextResult, reasoning: ReasoningResult, question: string): boolean {
+  const suppressPatterns = reasoning.suppress_result_patterns || []
+  if (!suppressPatterns.length) return false
+  const allowQuestionPatterns = reasoning.allow_suppressed_when_question_patterns || []
+  if (containsConfiguredPattern(question, allowQuestionPatterns)) return false
+  return containsConfiguredPattern(resultDescriptor(result), suppressPatterns)
+}
+
+function applyReasoningExclusions(
+  context: {
+    usable_results: ResolverContextResult[]
+    blocked_results: ResolverContextResult[]
+    all_results: ResolverContextResult[]
+    results: ResolverContextResult[]
+    [key: string]: any
+  },
+  reasoning: ReasoningResult,
+  question: string
+): typeof context {
+  if (!reasoning.suppress_result_patterns?.length) return context
+
+  const suppressed = context.all_results
+    .filter((r) => shouldSuppressByReasoningFilters(r, reasoning, question))
+    .map((r) => ({
+      type: r.type,
+      kind: r.kind,
+      filename: r.filename,
+      title: r.title,
+      domain: r.domain,
+      score: r.score,
+      suppressed_reason: 'reasoning_result_filter'
+    }))
+
+  if (!suppressed.length) return context
+
+  const keep = (r: ResolverContextResult) => !shouldSuppressByReasoningFilters(r, reasoning, question)
+  return {
+    ...context,
+    usable_results: context.usable_results.filter(keep),
+    blocked_results: context.blocked_results.filter(keep),
+    all_results: context.all_results.filter(keep),
+    results: context.results.filter(keep),
+    suppressed_results: suppressed
+  }
+}
+
 function emptyEligibility(): EligibilityResult {
   return {
     eligibility: 'indeterminate',
@@ -53,7 +119,9 @@ function emptyReasoning(): ReasoningResult {
     safety_constraints: [],
     must_include: [],
     must_not: [],
-    overrides: []
+    overrides: [],
+    suppress_result_patterns: [],
+    allow_suppressed_when_question_patterns: []
   }
 }
 
@@ -110,7 +178,7 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
     may_use_for: 'gap_identification_only',
     must_not_use_for: intent ?? 'requested_intent'
   }))
-  const context = {
+  let context: any = {
     usable_results: usableResults,
     blocked_results: blockedResults,
     all_results: allResults,
@@ -136,6 +204,11 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
     warnings.push('no_reasoning_map')
   }
 
+  context = applyReasoningExclusions(context, reasoning, a.question)
+  if (Array.isArray((context as any).suppressed_results) && (context as any).suppressed_results.length) {
+    warnings.push(`reasoning_exclusions:${reasoning.matched_intersection}:${(context as any).suppressed_results.length}`)
+  }
+
   // --- Compose the governed answer package. ---
   // Layer 1 vetoes ONLY on an explicit `ineligible`. An absent ruleset (reason_code
   // no_ruleset) or a ruleset that reaches no determination both resolve to `indeterminate`
@@ -144,8 +217,9 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
   // could never be `allowed`; "no opinion" was conflated with "no". A domain author who
   // wants a hard default block sets an `ineligible` default_outcome instead.
   const eligibilityDetermined = eligibility.eligibility === 'eligible'
+  const eligibilityNeedsLocalPolicy = eligibility.eligibility === 'local_policy_required'
   const eligibilityBlocks = eligibility.eligibility === 'ineligible'
-  const permittedResults = context.usable_results
+  const permittedResults: ResolverContextResult[] = context.usable_results
   const hasPermittedContext = permittedResults.length > 0
   // The map can hard-block by demanding a Refuse shape; otherwise it only shapes the answer.
   const reasoningBlocks = reasoning.answer_shape === 'Refuse'
@@ -165,9 +239,9 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
 
   const answerScope = operationalBlocks || eligibilityBlocks || reasoningBlocks
     ? 'refusal_only'
-    : eligibility.eligibility === 'indeterminate'
+    : eligibility.eligibility === 'indeterminate' || eligibilityNeedsLocalPolicy
       ? 'gap_or_uncertainty_explanation_only'
-      : blockedResults.length > 0 && usableResults.length === 0
+      : context.blocked_results.length > 0 && context.usable_results.length === 0
         ? 'gap_acknowledgement_only'
         : 'answer_from_usable_context_only'
 
@@ -183,14 +257,16 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
     note: allowed
       ? eligibilityDetermined
         ? 'Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
-        : 'Layer 1 makes no eligibility determination for this domain; do not assert eligibility. Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
+        : eligibilityNeedsLocalPolicy
+          ? 'Layer 1 requires local-policy data for this slot; do not assert eligibility. Explain the local-policy dependency using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
+          : 'Layer 1 makes no eligibility determination for this domain; do not assert eligibility. Render prose to answer_shape using only the cited context; honour must_include/must_not; do not exceed the governed answer.'
       : operationalBlocks
         ? 'Operational use refused. Do not use retrieved content as authority for formal/live/payment/enforcement action.'
         : eligibilityBlocks
           ? 'Ineligible under Layer 1; do not assert eligibility. Explain the position and, if a shape is set, follow it.'
-        : !hasPermittedContext
-          ? 'No permitted curated context for this intent; do not answer substantively.'
-          : 'Reasoning map blocks a substantive answer for this intersection.'
+          : !hasPermittedContext
+            ? 'No permitted curated context for this intent; do not answer substantively.'
+            : 'Reasoning map blocks a substantive answer for this intersection.'
   }
 
   return ok({ eligibility, context, reasoning, translation_brief: translationBrief }, warnings)
