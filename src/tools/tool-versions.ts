@@ -1,9 +1,12 @@
 import { createHash } from 'crypto'
 import { DomainEnvelope, ToolDefinition, ok, toEnvelope } from '../types'
 import { TOOL_CONTRACT_VERSION } from './version'
+import { WRITE_OPERATIONS } from './write'
 
 function versions(): Record<string, unknown> {
-  const operations = ['ingest', 'register_source', 'update_page', 'patch_page_metadata', 'update_schema', 'deprecate_page', 'delete_blob', 'set_provenance', 'mark_source_checked', 'migrate_governance', 'reconcile_vectors']
+  // Derived from the live OPERATIONS map (see write.ts) — the manifest always reflects
+  // exactly what the runtime accepts, so the contract hash can never advertise a stale set.
+  const operations = WRITE_OPERATIONS
   const payload = {
     server: 'library-mcp',
     server_version: TOOL_CONTRACT_VERSION,

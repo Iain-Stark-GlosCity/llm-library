@@ -32,12 +32,16 @@ const RESOURCES: Record<string, (input: unknown) => Promise<DomainEnvelope>> = {
   tool_versions: toolVersionsTool.handler
 }
 
+// Single source of truth for the accepted resources — the visible enum derives from the
+// RESOURCES map so the contract can never drift from what infoImpl actually dispatches.
+const RESOURCE_NAMES: string[] = Object.keys(RESOURCES)
+
 const inputSchema = {
   type: 'object',
   properties: {
     resource: {
       type: 'string',
-      enum: ['instructions', 'schema', 'pages', 'page', 'rules', 'reasoning', 'domains', 'governance', 'tool_versions'],
+      enum: RESOURCE_NAMES,
       description:
         'Which read-only resource to fetch. "instructions": operating doctrine (no other ' +
         'input). "schema": per-domain schema (requires domain). "pages": curated catalogue ' +
