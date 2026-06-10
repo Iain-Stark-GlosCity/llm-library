@@ -56,6 +56,12 @@ function containsConfiguredPattern(text: string, patterns: string[]): boolean {
   })
 }
 
+export function l3GovernsScope(reasoning: ReasoningResult): boolean {
+  return reasoning.matched_intersection !== null
+    && typeof reasoning.answer_shape === 'string'
+    && reasoning.answer_shape !== 'Refuse'
+}
+
 export function shouldSuppressByReasoningFilters(result: ResolverContextResult, reasoning: ReasoningResult, question: string): boolean {
   const suppressPatterns = reasoning.suppress_result_patterns || []
   if (!suppressPatterns.length) return false
@@ -239,7 +245,7 @@ async function resolveImpl(input: unknown): Promise<DomainEnvelope> {
 
   const answerScope = operationalBlocks || eligibilityBlocks || reasoningBlocks
     ? 'refusal_only'
-    : eligibility.eligibility === 'indeterminate' || eligibilityNeedsLocalPolicy
+    : !l3GovernsScope(reasoning) && (eligibility.eligibility === 'indeterminate' || eligibilityNeedsLocalPolicy)
       ? 'gap_or_uncertainty_explanation_only'
       : context.blocked_results.length > 0 && context.usable_results.length === 0
         ? 'gap_acknowledgement_only'
