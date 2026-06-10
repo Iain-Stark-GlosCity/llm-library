@@ -134,3 +134,63 @@ jobs:
             }
             if ((Get-Date) -gt $deadline) { throw 'Timed out waiting for deployment to complete.' }
           }
+
+          # Force a trigger sync so the Functions host picks up the new package.
+          # Kudu reporting success does not guarantee the host has reloaded — this is
+          # the documented fix for "bits don't sync" on Azure Functions zipdeploy.
+          Write-Host "Syncing function triggers..."
+          try {
+            Invoke-RestMethod -Uri "https://$scmHost/api/functions/synctriggers" `
+              -Method POST -Headers $headers -TimeoutSec 60 | Out-Null
+            Write-Host "Trigger sync requested."
+          } catch {
+            Write-Host "  (trigger sync non-fatal: $($_.Exception.Message))"
+          }
+
+          # Derive the public app URL from the SCM host (strip the .scm segment).
+          $appHost = $scmHost -replace '\.scm\.', '.'
+          $healthUrl = "https://$appHost/api/mcp"
+          Write-Host "Polling app health at $healthUrl (up to 2 min)..."
+
+          $healthDeadline = (Get-Date).AddMinutes(2)
+          $healthy = $false
+          while ((Get-Date) -lt $healthDeadline) {
+            Start-Sleep -Seconds 10
+            try {
+              $h = Invoke-RestMethod -Uri $healthUrl -Method GET -TimeoutSec 20
+              if ($h.ok -eq $true) {
+                Write-Host "  App health OK. ready=$($h.data.configuration.ready)"
+                $healthy = $true
+                break
+              }
+              Write-Host "  ok=false; retrying..."
+            } catch {
+              Write-Host "  (not yet: $($_.Exception.Message))"
+            }
+          }
+
+          if (-not $healthy) {
+            # Worker may have crashed (e.g. native binary file-lock during extraction).
+            # Trigger a Kudu-level restart so the host reloads the deployed package cleanly.
+            Write-Host "Host did not come up within 2 min — triggering restart..."
+            try {
+              Invoke-RestMethod -Uri "https://$scmHost/api/restart" -Method POST `
+                -Headers $headers -TimeoutSec 60 | Out-Null
+              Write-Host "  Restart requested. Waiting 30s..."
+            } catch {
+              Write-Host "  (restart non-fatal: $($_.Exception.Message))"
+            }
+            Start-Sleep -Seconds 30
+
+            # One final health check — fail the workflow if still down.
+            try {
+              $h = Invoke-RestMethod -Uri $healthUrl -Method GET -TimeoutSec 30
+              if ($h.ok -eq $true) {
+                Write-Host "  App recovered after restart."
+              } else {
+                throw "App health returned ok=false after restart. Check Azure portal logs."
+              }
+            } catch [System.Net.WebException] {
+              throw "App still unreachable after restart. Check Azure portal for node exit errors."
+            }
+          }
