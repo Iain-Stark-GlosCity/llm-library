@@ -1,344 +1,179 @@
 # Library MCP
 
-An MCP server that maintains a curated, source-linked knowledge base and exposes it
-to AI agents as queryable tools. Built as an Azure Functions v4 app (Node 20 LTS,
-TypeScript).
+An MCP server that maintains a curated, source-linked knowledge base and exposes it to AI agents as queryable tools. Built as an Azure Functions v4 app (Node 20 LTS, TypeScript).
 
 > **RAG retrieves evidence. MCP returns tools. This layer maintains knowledge.**
->
-> But underneath, it is a data problem, not an AI one: a **derived, governed knowledge
-> layer** between systems of record and the AI channels that consume it — two hops from
-> truth, never a system of record. Confidence is not currency.
+> 
+> But underneath, it is a data problem, not an AI one: a **derived, governed knowledge layer** between systems of record and the AI channels that consume it — two hops from truth, never a system of record. Confidence is not currency.
 
 -----
 
 ## Why this exists
 
-Most AI systems that work with documents use RAG — Retrieval Augmented Generation.
-You upload files, the AI searches them at query time, and generates an answer. It
-works, but the AI re-derives everything from scratch on every question. Nothing
-accumulates. If you ask a question that requires synthesising five documents, the
-AI has to find and piece together the relevant fragments every time.
+Most AI systems that work with documents use RAG — Retrieval Augmented Generation. You upload files, the AI searches them at query time, and generates an answer. It works, but the AI re-derives everything from scratch on every question. Nothing accumulates. If you ask a question that requires synthesising five documents, the AI has to find and piece together the relevant fragments every time.
 
-This system takes a different approach. Instead of retrieving from raw documents
-at query time, an AI agent incrementally builds and maintains a **persistent wiki**
-of curated knowledge pages. Each page is written by an AI librarian, linked to its
-sources, graded for confidence, and updated when the underlying material changes.
-The knowledge compounds over time rather than being re-derived on every query.
+This system takes a different approach. Instead of retrieving from raw documents at query time, an AI agent incrementally builds and maintains a **persistent wiki** of curated knowledge pages. Each page is written by an AI librarian, linked to its sources, graded for confidence, and updated when the underlying material changes. The knowledge compounds over time rather than being re-derived on every query.
 
-The practical difference: a query against this system returns a curated, versioned,
-source-linked page that reflects everything that has been read and assessed on a topic.
-A RAG query returns raw fragments.
+The practical difference: a query against this system returns a curated, versioned, source-linked page that reflects everything that has been read and assessed on a topic. A RAG query returns raw fragments.
 
 ### The problem it is designed for
 
-Structured knowledge domains — legislation, policy, regulation, technical standards —
-are difficult for AI systems to handle reliably. The source material is dense,
-heavily amended, and legally precise. A single regulation might span hundreds of
-provisions. Getting a fact wrong has real consequences.
+Structured knowledge domains — legislation, policy, regulation, technical standards — are difficult for AI systems to handle reliably. The source material is dense, heavily amended, and legally precise. A single regulation might span hundreds of provisions. Getting a fact wrong has real consequences.
 
-RAG does not solve this. It finds relevant text. It does not know whether that text
-is current, whether it contradicts something else, or how much confidence to place
-in a partial fetch. A curated knowledge base where every claim is tied to a specific
-source provision, and where confidence is explicitly graded, is a different tool for
-a different problem.
+RAG does not solve this. It finds relevant text. It does not know whether that text is current, whether it contradicts something else, or how much confidence to place in a partial fetch. A curated knowledge base where every claim is tied to a specific source provision, and where confidence is explicitly graded, is a different tool for a different problem.
 
 ### What this is not
 
-This is not a chatbot. It is not a question-answering system. It is infrastructure —
-a knowledge layer that any MCP-capable AI agent can use as an extension of its
-working memory. The agent that queries it decides what to do with what it gets back.
+This is not a chatbot. It is not a question-answering system. It is infrastructure — a knowledge layer that any MCP-capable AI agent can use as an extension of its working memory. The agent that queries it decides what to do with what it gets back.
 
-It is also not a system of record, and not a source of truth. Mistaking it for either
-is the central risk, which is why the next section is about data, not AI.
+It is also not a system of record, and not a source of truth. Mistaking it for either is the central risk, which is why the next section is about data, not AI.
 
 -----
 
 ## A data problem, not an AI problem
 
-It is tempting to frame this as an AI capability. It is more useful — and safer — to
-frame it as a data architecture, because that is where the risks live. It is a
-**derived, governed knowledge layer that sits between systems of record and the AI
-channels that consume it.** Five concerns that should stay separate get blurred the
-moment you let an agent "just answer from the library":
+It is tempting to frame this as an AI capability. It is more useful — and safer — to frame it as a data architecture, because that is where the risks live. It is a **derived, governed knowledge layer that sits between systems of record and the AI channels that consume it.** Five concerns that should stay separate get blurred the moment you let an agent “just answer from the library”:
 
-- **System of record** — the authoritative origin of a fact. For these domains it is
-  external: legislation.gov.uk, a council's constitution, a supplier register. It is
-  never this app.
-- **Source of truth** — the system of record *as of now*. Also external, and only
-  knowable by re-reading upstream.
-- **Operations** — live data that drives a decision in the moment. Needs freshness
-  guarantees and deterministic controls.
+- **System of record** — the authoritative origin of a fact. For these domains it is external: legislation.gov.uk, a council’s constitution, a supplier register. It is never this app.
+- **Source of truth** — the system of record *as of now*. Also external, and only knowable by re-reading upstream.
+- **Operations** — live data that drives a decision in the moment. Needs freshness guarantees and deterministic controls.
 - **Analysis** — derived, interpretive, lag-tolerant understanding.
-- **Governed interpretation** — approved organisational understanding, source-linked,
-  with explicit ownership, currency, review, and permitted use. This is the most the
-  library should aspire to be.
+- **Governed interpretation** — approved organisational understanding, source-linked, with explicit ownership, currency, review, and permitted use. This is the most the library should aspire to be.
 
-These have different properties, and trying to serve all five with one store — or not
-knowing which one you are operating in — is where things go wrong.
+These have different properties, and trying to serve all five with one store — or not knowing which one you are operating in — is where things go wrong.
 
-**This system is a derived knowledge layer: analysis by default, and governed
-interpretation only where ownership, source currency, review, and permitted use are
-explicit.** It is never a system of record or a source of truth. Concretely it is a
-read-optimised **index and cache** sitting two hops from truth: `library-raw` is a
-point-in-time **snapshot** of an external system of record, and the wiki is a
-**derived view** over those snapshots. Treating a curated page as the source of truth
-is a category error — it is a governed cache entry.
+**This system is a derived knowledge layer: analysis by default, and governed interpretation only where ownership, source currency, review, and permitted use are explicit.** It is never a system of record or a source of truth. Concretely it is a read-optimised **index and cache** sitting two hops from truth: `library-raw` is a point-in-time **snapshot** of an external system of record, and the wiki is a **derived view** over those snapshots. Treating a curated page as the source of truth is a category error — it is a governed cache entry.
 
 Two consequences follow, and they are the whole reason to be careful.
 
-**Confidence is not currency.** A page's confidence grade reflects how cleanly the
-underlying material was extracted — a tidy three-line provision scores high, a
-truncated 200-paragraph fetch scores medium. It says nothing about whether the cited
-provision has since been amended. A high-confidence page can be badly out of date.
-The two are independent axes.
+**Confidence is not currency.** A page’s confidence grade reflects how cleanly the underlying material was extracted — a tidy three-line provision scores high, a truncated 200-paragraph fetch scores medium. It says nothing about whether the cited provision has since been amended. A high-confidence page can be badly out of date. The two are independent axes.
 
-**Caching means cache invalidation.** A snapshot is stale against upstream the moment
-it is taken; a curated page is stale against its snapshot once the source is re-read
-and changes. The business consequence of answering from stale cache — a superseded
-regulation cited into a live procurement or planning decision — is the failure mode
-this design has to respect. Because a re-ingested source lands under a new `source_id`
-(the id embeds the content hash) while older snapshots remain, the system can detect
-this mechanically: snapshots are grouped by `upstream_id` (falling back to `source_url`),
-`library_query` returns a freshness signal per result, and `library_lint` flags
-`cites_superseded_source`, `snapshot_aged`, and `source_missing_upstream_id`. This is
-offline detection — it sees that a newer snapshot exists once one has been ingested, and
-how old a snapshot is, but it cannot by itself know that upstream changed without a
-re-fetch. Existing content needs no migration: any source with a `source_url` groups
-automatically; for those without one, lint surfaces them and `set_provenance` assigns an
-identity. After upstream revalidation, `mark_source_checked` records `last_upstream_check`
-and `upstream_status` without re-ingesting the source. The caller still owns the decision
-about how much staleness is acceptable for the consequence at hand.
+**Caching means cache invalidation.** A snapshot is stale against upstream the moment it is taken; a curated page is stale against its snapshot once the source is re-read and changes. The business consequence of answering from stale cache — a superseded regulation cited into a live procurement or planning decision — is the failure mode this design has to respect. Because a re-ingested source lands under a new `source_id` (the id embeds the content hash) while older snapshots remain, the system can detect this mechanically: snapshots are grouped by `upstream_id` (falling back to `source_url`), `library_query` returns a freshness signal per result, and `library_lint` flags `cites_superseded_source`, `snapshot_aged`, and `source_missing_upstream_id`. This is offline detection — it sees that a newer snapshot exists once one has been ingested, and how old a snapshot is, but it cannot by itself know that upstream changed without a re-fetch. Existing content needs no migration: any source with a `source_url` groups automatically; for those without one, lint surfaces them and `set_provenance` assigns an identity. After upstream revalidation, `mark_source_checked` records `last_upstream_check` and `upstream_status` without re-ingesting the source. The caller still owns the decision about how much staleness is acceptable for the consequence at hand.
 
 -----
 
 ## Conceptual lineage
 
-This system implements a domain-specific, source-gated extension of the
-**LLM-wiki pattern** described by Andrej Karpathy in
-[llm-wiki.md](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
-(April 2026). Karpathy’s core insight: instead of re-deriving knowledge from
-raw documents on every query, let an LLM incrementally build and maintain a
-persistent, compounding wiki that sits between you and the sources.
+This system implements a domain-specific, source-gated extension of the **LLM-wiki pattern** described by Andrej Karpathy in [llm-wiki.md](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f) (April 2026). Karpathy’s core insight: instead of re-deriving knowledge from raw documents on every query, let an LLM incrementally build and maintain a persistent, compounding wiki that sits between you and the sources.
 
-This implementation applies that pattern to structured legislative and policy
-domains with three additions that the general pattern does not include.
+This implementation applies that pattern to structured legislative and policy domains with three additions that the general pattern does not include.
 
-**Source-gating.** A claim only exists in the wiki if a specific statutory
-provision or primary source backs it. Pages that assert knowledge without
-citation are a regression, not a contribution. The lint checks enforce this.
+**Source-gating.** A claim only exists in the wiki if a specific statutory provision or primary source backs it. Pages that assert knowledge without citation are a regression, not a contribution. The lint checks enforce this.
 
-**Confidence typing.** Pages carry an explicit confidence level (`high`,
-`medium`, `low`, plus `unverified` for material not yet assessed) that reflects
-the quality of the underlying extraction, not the AI’s self-assessed certainty.
-A cleanly fetched three-line provision is high confidence. A 200-paragraph
-regulation fetched in chunks with visible truncation is medium. The distinction
-matters in domains where errors have real consequences.
+**Confidence typing.** Pages carry an explicit confidence level (`high`, `medium`, `low`, plus `unverified` for material not yet assessed) that reflects the quality of the underlying extraction, not the AI’s self-assessed certainty. A cleanly fetched three-line provision is high confidence. A 200-paragraph regulation fetched in chunks with visible truncation is medium. The distinction matters in domains where errors have real consequences.
 
-**Gap register.** Unresolved provisions are tracked as first-class state rather
-than left implicit. `library_query` reports a mechanical gap list for terms it
-cannot satisfy from the catalogue or returned evidence, and contradiction pages
-are linted for an explicit resolution. The intent is an epistemic control —
-gaps are named and source-backed updates are required to close them — not a
-maintenance afterthought.
+**Gap register.** Unresolved provisions are tracked as first-class state rather than left implicit. `library_query` reports a mechanical gap list for terms it cannot satisfy from the catalogue or returned evidence, and contradiction pages are linted for an explicit resolution. The intent is an epistemic control — gaps are named and source-backed updates are required to close them — not a maintenance afterthought.
 
-The pattern, the tooling, and the domain application are all separate
-contributions. Credit to Karpathy for the gates.
+The pattern, the tooling, and the domain application are all separate contributions. Credit to Karpathy for the gates.
 
 -----
 
 ## How it works
 
-The system has three layers, following Karpathy’s architecture.
+The library has three parts, following Karpathy’s architecture. (“Parts” deliberately — the word “layer” is reserved for the governance stack described later.)
 
-**Raw sources** are ingested documents — legislation, guidance, policy text,
-primary sources. They are stored immutably and never modified by the AI. But
-immutable means fixed, not authoritative: each is a point-in-time **snapshot** of an
-external system of record, and can be stale against upstream the moment it is fetched.
-The real source of truth stays upstream.
+**Raw sources** are ingested documents — legislation, guidance, policy text, primary sources. They are stored immutably and never modified by the AI. But immutable means fixed, not authoritative: each is a point-in-time **snapshot** of an external system of record, and can be stale against upstream the moment it is fetched. The real source of truth stays upstream.
 
-**The wiki** is a directory of curated knowledge pages maintained by an AI
-librarian agent. Each page covers a specific concept or provision. Pages are
-versioned, source-linked, and confidence-graded. The librarian writes and updates
-them as new sources are ingested or existing understanding changes.
+**The wiki** is a directory of curated knowledge pages maintained by an AI librarian agent. Each page covers a specific concept or provision. Pages are versioned, source-linked, and confidence-graded. The librarian writes and updates them as new sources are ingested or existing understanding changes.
 
-**The schema** is the operating doctrine: what the library is, how pages should
-be structured, what citation conventions apply, and what the librarian agent
-should do in each situation.
+**The schema** is the operating doctrine: what the library is, how pages should be structured, what citation conventions apply, and what the librarian agent should do in each situation.
 
-When an AI agent queries the library, it gets back curated pages, not raw fragments.
-The cross-references are already there. The confidence levels are already assessed.
-The gaps are already flagged. The agent does not have to reconstruct any of this
-from scratch.
+When an AI agent queries the library, it gets back curated pages, not raw fragments. The cross-references are already there. The confidence levels are already assessed. The gaps are already flagged. The agent does not have to reconstruct any of this from scratch.
 
-Those three parts are the **library itself** — Layer 2 of a wider four-part
-architecture. Beside it sit two deterministic governing layers — a **Constitution**
-of rules and an **RDF reasoning map** — plus a translation-only LLM. They are what turn
-*declared* governance into *hard gates*; see
-[**The governing layers**](#the-governing-layers-deterministic-gates-around-the-model)
-below.
+Those three parts are the **library itself** — Layer 2 of a wider four-part architecture. Beside it sit two deterministic governing layers — a **Constitution** of rules and an **RDF reasoning map** — plus a translation-only LLM. They are what turn *declared* governance into *hard gates*; see [**The governing layers**](#the-governing-layers-deterministic-gates-around-the-model) below, and [**Reference implementation**](#reference-implementation-council-tax-rebuild) for the live domain that exercises all three.
 
 -----
 
 ## The tools
 
-The surface is five role-shaped tools. Reads fold into `library_info` (pick a
-`resource`) and writes fold into `library_write` (pick an `operation`), so the
-same capabilities are exposed through fewer top-level tools.
+The surface is six role-shaped tools, plus `library_update_rules` and `library_update_reasoning` on their own admin routes. Reads fold into `library_info` (pick a `resource`) and writes fold into `library_write` (pick an `operation`), so the same capabilities are exposed through fewer top-level tools.
 
-|Tool           |What it does                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-|`library_ping` |Health check. No dependencies. Call first to confirm the transport is working before touching storage. Returns safe diagnostics for missing configuration without exposing secret values.                                                                                                                                                                                                                                                       |
-|`library_info` |Read-only inspection. `resource: instructions` returns the operating doctrine. `resource: schema` returns the per-domain schema (needs `domain`). `resource: pages` returns the curated catalogue (optional `domain`/`status` filter). `resource: page` returns one page by filename. `resource: rules` returns the Layer 1 ruleset and, given `inputs`, resolves eligibility (which rule fired). `resource: reasoning` returns the Layer 3 map and, given `signals`, the governing answer shape. `resource: domains` returns the cross-layer **coverage inventory**: every domain seen across the wiki/schema/rules/reasoning stores, its page counts, which layers it has, and gaps (incl. `artifacts_without_pages` — a domain-string typo where a rule/map never composes).|
-|`library_query`|Hybrid retrieval over curated wiki pages (default) or raw source chunks (dense + sparse fused, so exact terminology like regulation numbers surfaces reliably). Each curated result is a **governed answer**: `confidence` (extraction quality), a **freshness** block (stalest cited snapshot age, whether a newer snapshot exists), and a **provenance** block (cited `source_id`s with `source_url`, `upstream_owner`, capture date, `upstream_status`; plus page review and permitted-use). Confidence and currency are independent. Optionally pass **`intended_use`** for a per-result `use_permitted` decision (increasing guard rails by mode); operational intents are refused and content withheld. Plus a mechanical gap list.|
-|`library_resolve`|Composes all layers for one question: **Layer 1** deterministic eligibility (which rule fired), **Layer 2** sourced context, **Layer 3** the required answer shape + safety constraints. Returns a `translation_brief` (`allowed`, `answer_shape`, `safety_constraints`, `must_include`, `must_not`, `cite_sources`) for an LLM to render — the model makes no governance decision. Pass `inputs` (Layer 1 facts) and `signals` (Layer 3 context). Consumption endpoint only.|
-|`library_write`|The only mutating tool (librarian mode only). Operations: `ingest`, `register_source`, `update_page` (the only path to wiki content; carries governance metadata — `allowed_use`/`prohibited_use`, `last_source_check`, `business_consequence_if_stale`, `invalidation_policy`), `patch_page_metadata` (lightweight governance/review metadata patch on an existing page — **no re-embed, no history** — for backfilling at scale), `update_schema`, `deprecate_page`, `delete_blob` (hard-delete blob + vector + registry entry), `set_provenance` (assign `upstream_id`/`source_url`/`upstream_owner` to an existing source), `mark_source_checked` (record `last_upstream_check`/`upstream_status` after source revalidation), `migrate_governance` (dry-run/apply governed-domain metadata migration), `reconcile_vectors` (reconcile the active wiki vector collection to the manifest for a domain — `dry_run` by default; `mode` `payload_only`/`reembed_stale`/`full_rebuild`; `delete_orphans`/`delete_duplicates`/`include_deprecated` cleanup).|
-|`library_lint` |Read-only mechanical health checks. Finds: orphan pages, missing citations, open contradictions, broken refs, stale embeddings, unindexed sources, manifest/blob drift; **stale cache** (`cites_superseded_source`, `snapshot_aged`, `source_missing_upstream_id`); `operational_use_not_permitted` (**always checked** — a safety invariant); `governance_not_adopted` (a domain consumable under real intents that hasn't opted into governance — so query refusals aren't otherwise explained); and — for domains that set `governance_required` — **governance** (`public_guidance_without_last_source_check`, `decision_support_without_stale_risk`, `high_risk_page_without_invalidation_policy`, `active_page_cites_unchecked_source`, `active_page_cites_stale_source`, `active_page_cites_superseded_source`). Reports, does not fix.|
+**`library_ping`** — Health check. No dependencies. Call first to confirm the transport is working before touching storage. Returns safe diagnostics for missing configuration without exposing secret values, plus contract metadata — `server_version`, `tool_contract_version`, and a shared `contract_hash` — so a client can confirm every surface is on the same contract. (`library_info` `resource: tool_versions` gives the full per-surface manifest.)
+
+**`library_info`** — Read-only inspection across all three layers. Pick a `resource`: `instructions` (operating doctrine), `schema` (per-domain schema; needs `domain`), `pages` (curated catalogue; optional `domain`/`status` filter), `page` (one page by filename), `rules` (Layer 1 ruleset; pass `inputs` to resolve eligibility and see which rule fired), `reasoning` (Layer 3 map; pass `signals` to get the governing answer shape), `domains` (cross-layer coverage inventory — page counts, which layers each domain has, and gaps including `artifacts_without_pages`), `governance` (per-domain governance inventory), `tool_versions` (exposed tool/schema contract manifest).
+
+**`library_query`** — Hybrid retrieval over curated wiki pages (default) or raw source chunks (dense + sparse fused, so exact terminology like regulation numbers surfaces reliably alongside conceptual matches). Each curated result is a **governed answer**: `confidence` (extraction quality), a **freshness** block (stalest cited snapshot age, whether a newer snapshot exists), and a **provenance** block (cited `source_id`s with `source_url`, `upstream_owner`, capture date, `upstream_status`; plus page review, `page_role`, and permitted-use). Confidence and currency are independent. Pass **`intended_use`** for a per-result `use_permitted` decision with increasing guard rails by mode; operational intents are refused and content withheld. Plus a mechanical gap list.
+
+**`library_resolve`** — Composes all three layers for one question: **Layer 1** deterministic eligibility (which rule fired), **Layer 2** sourced context, **Layer 3** required answer shape and safety constraints. Context is returned in three buckets: `usable_results` (permitted for the declared `intent`), `blocked_results` (each annotated with `blocked_reason`, `may_use_for`, `must_not_use_for`), and `suppressed_results` (filtered by the reasoning map before permissioning ran). Returns a `translation_brief` — `allowed`, `answer_scope`, `answer_shape`, `safety_constraints`, `must_include`, `must_not`, `cite_sources` — for an LLM to render. The model makes no governance decision. Pass `inputs` (Layer 1 facts) and `signals` (Layer 3 context). Consumption endpoint only.
+
+**`library_write`** — The only mutating tool (library-admin endpoint only). Operations: `ingest`, `register_source`, `update_page` (the only path to wiki content; carries governance metadata — `page_role`, `allowed_use`/`prohibited_use`, `last_source_check`, `business_consequence_if_stale`, `invalidation_policy`), `patch_page_metadata` (lightweight governance/review patch in place — no re-embed, no history — for backfilling at scale), `update_schema`, `deprecate_page`, `delete_blob` (hard-delete blob + vector + registry entry), `set_provenance` (assign `upstream_id`/`source_url`/`upstream_owner` to an existing source), `mark_source_checked` (record `last_upstream_check`/`upstream_status` after source revalidation), `migrate_governance` (dry-run/apply governed-domain metadata migration, including conservative `page_role` inference), `reconcile_vectors` (reconcile the active wiki vector collection to the manifest — `dry_run` by default; modes `payload_only`, `reembed_stale`, `full_rebuild`; with `delete_orphans`/`delete_duplicates`/`include_deprecated` cleanup).
+
+**`library_lint`** — Read-only mechanical health checks, bucketed into `structural_issues`, `governance_issues`, and `vector_issues`. Structural checks cover orphan pages, missing citations, open contradictions, broken refs, unindexed sources, manifest/blob drift, stale cache (`cites_superseded_source`, `snapshot_aged`, `source_missing_upstream_id`), `operational_use_not_permitted` (always checked — a safety invariant), and `governance_not_adopted` (a consumable domain that hasn’t opted in, so query refusals aren’t left unexplained). Governance checks (domains with `governance_required`) cover `public_guidance_without_last_source_check`, `decision_support_without_stale_risk`, `high_risk_page_without_invalidation_policy`, `active_page_cites_unchecked_source`, stale and superseded source citations, and missing `page_role` or review metadata. Vector checks (`stale_embedding`, `missing_vector`, `orphan_vector`, `duplicate_vector`, `bad_payload_vector`, `embedding_model_mismatch`) are repaired by `library_write` (`operation: reconcile_vectors`). Reports, does not fix.
 
 -----
 
 ## Governed answers and permitted use
 
-Every curated answer can carry the governance a public-sector consumer needs to decide
-whether to rely on it: **provenance** (which sources, owned by whom, captured when, at
-what currency), **review** (`reviewed_at`, `last_source_check`), and **permitted use**.
+Every curated answer can carry the governance a public-sector consumer needs to decide whether to rely on it: **provenance** (which sources, owned by whom, captured when, at what currency), **review** (`reviewed_at`, `last_source_check`), and **permitted use**.
 
-Pages declare `allowed_use` / `prohibited_use` from a fixed vocabulary. The library
-**supports**, with increasing guard rails:
+Pages declare `allowed_use` / `prohibited_use` from a fixed vocabulary. The library **supports**, with increasing guard rails:
 
 `analysis` · `drafting` · `staff_guidance` · `public_guidance` · `decision_support`
 
-It will **never** authorise the operational modes — `formal_decision`,
-`live_account_action`, `payment_action`, `enforcement_action`. `update_page` rejects
-them in `allowed_use`, and lint flags any that slip in. Crucially: **the library
-declares and warns on use; it cannot enforce it.** A returned answer is data — the hard
-block on acting from cached knowledge must live in the operational channel's controls,
-not here. Treating this layer as the enforcement point would repeat the
-cache-as-system-of-record error one level up.
+It will **never** authorise the operational modes — `formal_decision`, `live_account_action`, `payment_action`, `enforcement_action`. `update_page` rejects them in `allowed_use`, and lint flags any that slip in. Crucially: **the library declares and warns on use; it cannot enforce it.** A returned answer is data — the hard block on acting from cached knowledge must live in the operational channel’s controls, not here. Treating this layer as the enforcement point would repeat the cache-as-system-of-record error one level up.
 
-A consumer can declare its intent per query with **`intended_use`**. `library_query`
-then returns a `use_permitted` decision per result against a ladder of guard rails:
-`analysis`/`drafting`/`staff_guidance` pass unless the page prohibits them;
-`public_guidance` also requires `last_source_check` and a non-superseded snapshot;
-`decision_support` also requires a declared `business_consequence_if_stale`. Each
-refusal carries `use_notes` saying why. An operational `intended_use` short-circuits
-before retrieval — content is withheld with `use_decision.permitted: false`.
+Permitted use is not decided by `allowed_use` alone. Every page also carries a **`page_role`** — what the page *is*, for governance purposes, independent of its page type. Decision-support-bearing roles (`statutory_extraction`, `compiler_grade_rule`, `validation_contract`, `local_policy`) can support `decision_support` when their currency requirements are met. Structural and navigational roles (`index`, `checklist`, `operational_model`, `rule_family`, `local_policy_placeholder`) are not decision-support authority and are blocked from that mode regardless of what `allowed_use` says — an index of enforcement pages is a map, not the territory, and the query layer treats it that way. `migrate_governance` infers `page_role` conservatively; high-impact pages should be reviewed and corrected after inference.
 
-Governance is adopted **per domain**: the guard-rail lint checks only apply where a
-domain's schema sets `governance_required: true`. Existing domains stay quiet until they
-opt in — a controlled-pilot path, not a big-bang migration. None of this metadata lives
-in the vector index; it is stored in the manifests and enforced in the query/lint layer.
+A consumer can declare its intent per query with **`intended_use`**. `library_query` then returns a `use_permitted` decision per result against a ladder of guard rails: `analysis`/`drafting`/`staff_guidance` pass unless the page prohibits them; `public_guidance` also requires `last_source_check` and a non-superseded snapshot; `decision_support` also requires a declared `business_consequence_if_stale` and a decision-support-bearing `page_role`. Each refusal carries `use_notes` saying why. An operational `intended_use` short-circuits before retrieval — content is withheld with `use_decision.permitted: false`.
+
+Governance is adopted **per domain**: the guard-rail lint checks only apply where a domain’s schema sets `governance_required: true`. Existing domains stay quiet until they opt in — a controlled-pilot path, not a big-bang migration. None of this metadata lives in the vector index; it is stored in the manifests and enforced in the query/lint layer.
 
 -----
 
 ## The governing layers: deterministic gates around the model
 
-Everything above is the **library** — derived knowledge with *soft* governance. It
-declares confidence, currency, and permitted use, and warns on misuse — but, as the
-previous section says, it "declares and warns … it cannot enforce." For domains where an
-answer drives a real decision, declaration is not enough: a fluent model can still talk
-its way past a warning. Two further layers sit beside the library and turn governance
-into **hard, deterministic gates the model cannot argue past.** Together with the library
-and a translation-only LLM they form a four-part "Sovereign AI" stack:
+Everything above is the **library** — derived knowledge with *soft* governance. It declares confidence, currency, and permitted use, and warns on misuse — but, as the previous section says, it “declares and warns … it cannot enforce.” For domains where an answer drives a real decision, declaration is not enough: a fluent model can still talk its way past a warning. Two further layers sit beside the library and turn governance into **hard, deterministic gates the model cannot argue past.** Together with the library and a translation-only LLM they form a four-part “Sovereign AI” stack:
 
-| Layer | Job | Determinism | Storage |
-|---|---|---|---|
-| **1 — Constitution** (governance rules) | Eligibility, thresholds, valid states → a governed outcome and *which rule fired* | Deterministic; no LLM, no vectors | `library-rules`, `{domain}.rules.json` |
-| **2 — Library** | Sourced context with confidence, currency, permitted use (everything above) | Vector retrieval | `library-raw` / `library-wiki` |
-| **3 — Reasoning Map** (RDF) | What the question *means*, the required **answer shape**, safety constraints, overrides | SPARQL over curated Turtle | `library-rdf`, `{domain}.ttl` |
-| **LLM** | Translate the governed answer into language | Renders; decides nothing | — |
+|Layer                                  |Job                                                                                                           |Determinism                      |Storage                               |
+|---------------------------------------|--------------------------------------------------------------------------------------------------------------|---------------------------------|--------------------------------------|
+|**1 — Constitution** (governance rules)|Eligibility, thresholds, valid states → a governed outcome and *which rule fired*                             |Deterministic; no LLM, no vectors|`library-rules`, `{domain}.rules.json`|
+|**2 — Library**                        |Sourced context with confidence, currency, permitted use (everything above)                                   |Vector retrieval                 |`library-raw` / `library-wiki`        |
+|**3 — Reasoning Map** (RDF)            |What the question *means*, the required **answer shape**, safety constraints, overrides, retrieval suppression|SPARQL over curated Turtle       |`library-rdf`, `{domain}.ttl`         |
+|**LLM**                                |Translate the governed answer into language                                                                   |Renders; decides nothing         |—                                     |
 
-The point of the split is to **reduce the LLM to translation.** It never decides
-eligibility, never decides whether an answer is safe to give, never picks the shape of
-the answer. Those are decided deterministically — before the model is invoked — and
-handed to it as constraints it cannot widen. The decision lives in version-controlled,
-auditable artifacts owned by the organisation, not in the model's generation.
+The point of the split is to **reduce the LLM to translation.** It never decides eligibility, never decides whether an answer is safe to give, never picks the shape of the answer. Those are decided deterministically — before the model is invoked — and handed to it as constraints it cannot widen. The decision lives in version-controlled, auditable artifacts owned by the organisation, not in the model’s generation.
 
 ### Layer 1 — the Constitution (governance rules)
 
-A `{domain}.rules.json` is an **ordered, first-match-wins** list of rules. Each rule pairs
-a condition (`when`) over structured inputs with an `outcome`. The condition is a **closed
-predicate AST — data, not code**: `all` / `any` / `not` over leaf comparisons (`eq`,
-`neq`, `lt`, `lte`, `gt`, `gte`, `in`, `exists`) against dotted input paths. A **pure**
-resolver (`resolveEligibility` — no I/O, no network, no randomness) walks the rules in
-order and returns the **eligibility, the id of the rule that fired, a reason code, and the
-ruleset version** — every outcome auditable to a specific rule. Malformed conditions fail
-closed (never grant eligibility). (Distinct from the per-domain *library* schema
-`{domain}.schema.json`, which only configures Layer 2 governance metadata; the Constitution
-is its own `{domain}.rules.json`.)
+A `{domain}.rules.json` is an **ordered, first-match-wins** list of rules. Each rule pairs a condition (`when`) over structured inputs with an `outcome`. The condition is a **closed predicate AST — data, not code**: `all` / `any` / `not` over leaf comparisons (`eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `in`, `exists`) against dotted input paths. A **pure** resolver (`resolveEligibility` — no I/O, no network, no randomness) walks the rules in order and returns the **eligibility, the id of the rule that fired, a reason code, and the ruleset version** — every outcome auditable to a specific rule. Malformed conditions fail closed (never grant eligibility). (Distinct from the per-domain *library* schema `{domain}.schema.json`, which only configures Layer 2 governance metadata; the Constitution is its own `{domain}.rules.json`.)
 
-**The gate it closes: invented eligibility.** Whether someone qualifies for a discount,
-exemption, or threshold is not something to let an LLM reason about from prose — it has a
-legally correct answer that must be the same every time and traceable to the rule that
-produced it. Layer 1 answers it deterministically. If the inputs don't establish
-eligibility, the governed outcome is "ineligible / indeterminate," and no amount of fluent
-generation changes that. **Why it matters:** the load-bearing yes/no leaves the model
-entirely and becomes a pure function of facts and the Constitution — reproducible,
-testable, and explainable by rule id in an audit or appeal.
+**The gate it closes: invented eligibility.** Whether someone qualifies for a discount, exemption, or threshold is not something to let an LLM reason about from prose — it has a legally correct answer that must be the same every time and traceable to the rule that produced it. Layer 1 answers it deterministically. If the inputs don’t establish eligibility, the governed outcome is “ineligible / indeterminate,” and no amount of fluent generation changes that. **Why it matters:** the load-bearing yes/no leaves the model entirely and becomes a pure function of facts and the Constitution — reproducible, testable, and explainable by rule id in an audit or appeal.
 
-**How it acts on context:** the gate is driven by the inputs. The same ruleset returns
-`owner_liable` for one set of facts and `single_person_discount` for another, naming the
-exact rule each time; add a fact and a different rule fires. Same Constitution, different
-facts, different governed outcome — predictably.
+Eligibility is the obvious use of Layer 1, not the only one. The reference ruleset opens with two rules that gate *use* before any entitlement logic runs. An **operational refusal rule** fires on `requested_use` (formal decision, live account, payment, enforcement) or `account_level_decision: true` and returns a refused outcome — the Constitution itself says “this question belongs to a system of operation, not to cached knowledge.” A **local-policy block** returns `indeterminate` for `decision_support` while locally determined values remain unregistered — a known gap fails closed instead of being papered over by national law. Rules can gate on use mode and on declared gaps, not just on entitlement facts.
+
+**How it acts on context:** the gate is driven by the inputs. The same ruleset returns `owner_liable` for one set of facts and `single_person_discount` for another, naming the exact rule each time; add a fact and a different rule fires. Same Constitution, different facts, different governed outcome — predictably.
 
 ### Layer 3 — the Reasoning Map (RDF)
 
-A `{domain}.ttl` Turtle graph is the **canonical** reasoning map (parsed into an ephemeral
-graph per cold start — no triple-store backend; canonical bytes live in blob). Given the
-**active context signals** of a question, a SPARQL traversal resolves a *semantic
-intersection* and returns the **shape the answer must take**: `answer_shape`,
-`safety_constraints`, `must_include`, `must_not`, and `overrides`. The engine is
-swappable — `oxigraph` (real SPARQL 1.1) or an `n3` triple-traversal fallback — both
-producing the same result.
+A `{domain}.ttl` Turtle graph is the **canonical** reasoning map (parsed into an ephemeral graph per cold start — no triple-store backend; canonical bytes live in blob). Given the **active context signals** of a question, a SPARQL traversal resolves a *semantic intersection* and returns the **shape the answer must take**: `answer_shape`, `safety_constraints`, `must_include`, `must_not`, and `overrides`. The engine is swappable — `oxigraph` (real SPARQL 1.1) or an `n3` triple-traversal fallback — both producing the same result.
 
-**The gate it closes: unsafe or wrong-shaped answers.** Some contexts must change *how*
-you answer regardless of the underlying facts. If a bailiff is at the door, the answer
-shape becomes urgent safeguarding guidance; `must_not` includes giving a payment
-instruction; `must_include` carries the right to request breathing space — and this
-**overrides** the ordinary answer shape. Encoding that as data means the constraint is
-applied deterministically, not left to the model to remember under pressure. **Why it
-matters:** the safety envelope of an answer — what it must contain, what it must never
-say, what overrides everything else — is governed centrally and cannot be eroded by
-phrasing, jailbreak, or a confidently wrong generation.
+**The gate it closes: unsafe or wrong-shaped answers.** Some contexts must change *how* you answer regardless of the underlying facts. If a bailiff is at the door, the answer shape becomes urgent safeguarding guidance; `must_not` includes giving a payment instruction; `must_include` carries the right to request breathing space — and this **overrides** the ordinary answer shape. Encoding that as data means the constraint is applied deterministically, not left to the model to remember under pressure. **Why it matters:** the safety envelope of an answer — what it must contain, what it must never say, what overrides everything else — is governed centrally and cannot be eroded by phrasing, jailbreak, or a confidently wrong generation.
 
-**How it acts on context:** the gate is driven by the signals. A routine query and a
-vulnerable-caller or bailiff-present query over the *same* eligibility can resolve to
-different answer shapes, different safety constraints, and different overrides. Context —
-not the model's mood — selects which gate closes.
+The map governs retrieval, not just rendering. An intersection can carry `suppress_result_patterns` — page-name patterns the resolver must drop from context even when vector search ranks them — and `allow_suppressed_when_question_patterns`, which re-admits them only when the question itself asks for that material. The bailiff intersection suppresses CTR means-test and charge-calculation pages: “council tax arrears” should not pull a benefit calculation into an urgent safeguarding answer merely because the words overlap. Suppressed pages are reported in `suppressed_results` with a `suppressed_reason`, so the filtering is visible, not silent.
+
+**How it acts on context:** the gate is driven by the signals. A routine query and a vulnerable-caller or bailiff-present query over the *same* eligibility can resolve to different answer shapes, different safety constraints, and different overrides. Context — not the model’s mood — selects which gate closes.
 
 ### How they compose — `library_resolve`
 
-`library_resolve` is where the three layers actually meet. It is the only place that runs
-all three for one question, in a fixed order, and reduces their separate verdicts to a
-single governed package. The interaction is deterministic, and each layer reads only the
-slice of the request meant for it:
+`library_resolve` is where the three layers actually meet. It is the only place that runs all three for one question, in a fixed order, and reduces their separate verdicts to a single governed package. The interaction is deterministic, and each layer reads only the slice of the request meant for it:
 
-| Request field | Routed to | Layer produces |
-|---|---|---|
-| `inputs` (structured facts) | **L1 — Constitution** | `eligibility`, `rule_fired`, `reason_code`, `governs[]` |
-| `question` / `intent` / `top_k` | **L2 — Library** (reuses `library_query`) | governed results: `confidence`, `freshness`, `provenance`, `use_permitted` |
-| `signals` (active context) | **L3 — Reasoning Map** | `answer_shape`, `safety_constraints`, `must_include`, `must_not`, `overrides` |
-| `domain` | all three | selects `{domain}.rules.json`, the L2 domain filter, and `{domain}.ttl` |
+|Request field                  |Routed to                                |Layer produces                                                                                     |
+|-------------------------------|-----------------------------------------|---------------------------------------------------------------------------------------------------|
+|`inputs` (structured facts)    |**L1 — Constitution**                    |`eligibility`, `rule_fired`, `reason_code`, `governs[]`                                            |
+|`question` / `intent` / `top_k`|**L2 — Library** (reuses `library_query`)|governed results: `confidence`, `freshness`, `provenance`, `use_permitted`                         |
+|`signals` (active context)     |**L3 — Reasoning Map**                   |`answer_shape`, `safety_constraints`, `must_include`, `must_not`, `overrides`, suppression patterns|
+|`domain`                       |all three                                |selects `{domain}.rules.json`, the L2 domain filter, and `{domain}.ttl`                            |
 
-Run order is **L1 → L2 → L3**: eligibility is settled before a single document is
-retrieved, and the answer shape is settled last. The layers never call each other —
-`library_resolve` is the only coupling — which keeps each one independently testable and
-lets a domain adopt them one at a time.
+Run order is **L1 → L2 → L3**: eligibility is settled before a single document is retrieved, and the answer shape is settled last. The layers never call each other — `library_resolve` is the only coupling — which keeps each one independently testable and lets a domain adopt them one at a time.
+
+**What the context looks like when it comes back.** Layer 2 results are returned in three buckets, so blocked material can never be quietly treated as authority. `usable_results` are permitted for the declared `intent`. `blocked_results` failed the permitted-use check and each carries `blocked_reason`, `may_use_for` (typically `gap_identification_only`), and `must_not_use_for` — present for transparency, fenced for use. `suppressed_results` were removed by the reasoning map’s suppression patterns before permissioning even ran.
 
 **Where the layers actually touch.** Two seams connect them, and both are *data, not code*:
 
-- **L1 → L3.** A rule's `outcome.governs` (e.g. `["RebuildSupportShape"]`) names the
-  Layer 3 answer-shape an eligible outcome expects. Layer 3 can then `overrides` that
-  standard shape when context demands it — the bailiff intersection overrides
-  `StandardRebuildAnswerShape` with `UrgentSafeguardingGuidance`. Eligibility points at a
-  shape; context can supersede it.
-- **L2 → brief.** The sources the LLM must cite (`cite_sources`) are the provenance
-  `source_id`s of the *use-permitted* Layer 2 results only — so citation is bound to what
-  retrieval actually allowed for the declared `intent`.
+- **L1 → L3.** A rule’s `outcome.governs` (e.g. `["RebuildSupportShape"]`) names the Layer 3 answer-shape an eligible outcome expects. Layer 3 can then `overrides` that standard shape when context demands it — the bailiff intersection overrides `StandardCouncilTaxAnswerShape` with `UrgentSafeguardingGuidance`. Eligibility points at a shape; context can supersede it.
+- **L2 → brief.** The sources the LLM must cite (`cite_sources`) are the provenance `source_id`s of the *use-permitted* Layer 2 results only — so citation is bound to what retrieval actually allowed for the declared `intent`.
 
-**The one boolean that fuses all three.** `translation_brief.allowed` is a conjunction of
-the layers' verdicts — but only an *active* veto counts, so an unconfigured governing layer
-never blocks a domain that does have context:
+**The one boolean that fuses all three.** `translation_brief.allowed` is a conjunction of the layers’ verdicts — but only an *active* veto counts, so an unconfigured governing layer never blocks a domain that does have context:
 
 ```
 allowed = (L1 eligibility !== "ineligible")     // indeterminate / no ruleset = "L1 doesn't govern", not a deny
@@ -346,42 +181,35 @@ allowed = (L1 eligibility !== "ineligible")     // indeterminate / no ruleset = 
         AND (L3 answer_shape !== "Refuse")
 ```
 
-The distinction matters: an *absent* ruleset resolves to `indeterminate` ("Layer 1 makes no
-determination"), which is **not** the same as an explicit `ineligible` ("Layer 1 denies").
-Only the latter vetoes. So a domain with rich Layer 2 context but no Constitution can still
-be `allowed` — and when it is, the brief's `note` reminds the consumer not to assert
-eligibility. No permitted context ⇒ `allowed: false`; a map that resolves to a `Refuse`
-shape ⇒ `allowed: false`. The brief always carries a `note` naming which layer withheld (or
-that eligibility was undetermined), so a `false` is actionable and an `allowed: true` on an
-ungoverned domain is still correctly qualified. A domain author who wants a hard default
-block sets an `ineligible` `default_outcome` in the ruleset.
+The distinction matters: an *absent* ruleset resolves to `indeterminate` (“Layer 1 makes no determination”), which is **not** the same as an explicit `ineligible` (“Layer 1 denies”). Only the latter vetoes. So a domain with rich Layer 2 context but no Constitution can still be `allowed` — and when it is, the brief’s `note` reminds the consumer not to assert eligibility. No permitted context ⇒ `allowed: false`; a map that resolves to a `Refuse` shape ⇒ `allowed: false`. The brief always carries a `note` naming which layer withheld (or that eligibility was undetermined), so a `false` is actionable and an `allowed: true` on an ungoverned domain is still correctly qualified. A domain author who wants a hard default block sets an `ineligible` `default_outcome` in the ruleset.
 
-**Per-domain adoption, graceful degradation.** Each layer is opt-in per domain through its
-own artifact, and a missing artifact never errors — it contributes nothing and is recorded
-as a warning (`no_ruleset`, `no_reasoning_map`):
+**`answer_scope` bounds what a `true` permits.** Alongside `allowed`, the brief carries `answer_scope`, which tells the renderer how far it may go: answer from the usable context only (`answer_from_usable_context_only`), acknowledge a gap or uncertainty without answering (`gap_or_uncertainty_explanation_only`), or not answer at all. The scope is decided by what the layers actually produced, not by which inputs were omitted: an L1 `indeterminate` with missing inputs surfaces as a warning and a do-not-assert-eligibility note, and does not collapse a context-rich safeguarding answer into a gap explanation. A question that retrieval cannot support, by contrast, is scoped down — the renderer may say what is missing, and nothing more.
 
-| Layer | Per-domain artifact | Container | Absent ⇒ |
-|---|---|---|---|
-| L1 — Constitution | `{domain}.rules.json` | `library-rules` | eligibility `indeterminate` |
-| L2 — governance | `{domain}.schema.json` | `library-schemas` | governance lint stays off; the library still serves |
-| L3 — Reasoning Map | `{domain}.ttl` | `library-rdf` | empty answer shape; fall back to L2 context |
+**Per-domain adoption, graceful degradation.** Each layer is opt-in per domain through its own artifact, and a missing artifact never errors — it contributes nothing and is recorded as a warning (`no_ruleset`, `no_reasoning_map`):
 
-So a domain can run on Layer 2 alone, gain a Constitution when eligibility starts to carry
-consequence, and gain a reasoning map when answer *shape* and safety need governing —
-without touching the others. (Note the two senses of "schema": the per-domain
-`{domain}.schema.json` above only *configures Layer 2 governance* — the `governance_required`
-switch and snapshot-age thresholds; the deterministic Constitution is its own
-`{domain}.rules.json`.)
+|Layer             |Per-domain artifact   |Container        |Absent ⇒                                           |
+|------------------|----------------------|-----------------|---------------------------------------------------|
+|L1 — Constitution |`{domain}.rules.json` |`library-rules`  |eligibility `indeterminate`                        |
+|L2 — governance   |`{domain}.schema.json`|`library-schemas`|governance lint stays off; the library still serves|
+|L3 — Reasoning Map|`{domain}.ttl`        |`library-rdf`    |empty answer shape; fall back to L2 context        |
 
-The whole arrangement puts the **organisation's rules and safety constraints, not the
-model, in charge of the decision.** Layer 2 can tell you a cached page is stale or not
-permitted for operational use, but it cannot stop a model acting on it. Layers 1 and 3
-move the decisions that carry consequence — *are they eligible* and *is this answer safe
-and correctly shaped* — out of the model and into deterministic, auditable, version-
-controlled artifacts. The model becomes a translator of a governed answer: the only role
-it can play safely where the answer has consequences. Full design and a worked
-council-tax / bailiff walkthrough:
-[`docs/sovereign-architecture.md`](./docs/sovereign-architecture.md).
+So a domain can run on Layer 2 alone, gain a Constitution when eligibility starts to carry consequence, and gain a reasoning map when answer *shape* and safety need governing — without touching the others. (Note the two senses of “schema”: the per-domain `{domain}.schema.json` above only *configures Layer 2 governance* — the `governance_required` switch and snapshot-age thresholds; the deterministic Constitution is its own `{domain}.rules.json`.)
+
+The whole arrangement puts the **organisation’s rules and safety constraints, not the model, in charge of the decision.** Layer 2 can tell you a cached page is stale or not permitted for operational use, but it cannot stop a model acting on it. Layers 1 and 3 move the decisions that carry consequence — *are they eligible* and *is this answer safe and correctly shaped* — out of the model and into deterministic, auditable, version-controlled artifacts. The model becomes a translator of a governed answer: the only role it can play safely where the answer has consequences. Full design and a worked council-tax / bailiff walkthrough: [`docs/sovereign-architecture.md`](docs/sovereign-architecture.md).
+
+-----
+
+## Reference implementation: council-tax-rebuild
+
+The design above is exercised by a live domain, not just fixtures. `council-tax-rebuild` encodes the England council tax charge pipeline — Local Government Finance Act 1992 and its secondary legislation — against Gloucester City Council’s local context. Test fixtures ship in [`fixtures/ctax-rebuild`](fixtures/ctax-rebuild); the deployed domain, as of June 2026, looks like this.
+
+**Layer 2** holds 58 active pages, every one citing legislation.gov.uk snapshots with `upstream_status` and `last_upstream_check` recorded. The domain runs with `governance_required: true`, a permitted-use ceiling of `decision_support`, and a 180-day snapshot-age threshold. `library_lint` reports zero issues across all three buckets.
+
+**Layer 1** is a twelve-rule Constitution over a nine-stage charge pipeline (liability → chargeable amount → disabled reduction → disregards → exemption → discount → premium → discretionary reduction → CTR). It opens with the operational-refusal and local-policy-block rules described above, then covers exemption short-circuit, single person discount, all-occupants-disregarded, disabled reduction, both premium regimes, and the pensioner and working-age CTR routes.
+
+**Layer 3** is a reasoning map whose intersections include `BailiffAtDoor`. With `signals: { bailiff_present: true }` and `intent: public_guidance`, `library_resolve` matches the intersection, overrides the standard council tax shape with `UrgentSafeguardingGuidance`, suppresses CTR means-test and charge-calculation pages from retrieval, blocks an enforcement index page from `public_guidance` (its `page_role` is `index` — a map, not authority), and returns a brief that must include debt-advice contact, an entry-rights summary, and the right to request Breathing Space, and must never instruct payment or suggest entry is unconditional. Layer 1’s `indeterminate` (no liability facts supplied) surfaces as a warning and a do-not-assert-eligibility note; it does not block the safeguarding answer.
+
+The pattern that makes the domain portable is the **LOCAL flag**. National statute is shared by every English billing authority and is extracted once, at production confidence. Slots that depend on a council’s own determinations — s.11A discount classes, s.11B and s.11D premium percentages, s.13A discretionary reduction, working-age CTR scheme values — are recorded at statutory-framework level and fail closed: Layer 1 returns `indeterminate` for decision support until citable council resolutions are registered. Another authority adopts the domain by registering its own resolution values. The national extraction does not change.
 
 -----
 
@@ -389,52 +217,26 @@ council-tax / bailiff walkthrough:
 
 The system runs on Azure infrastructure with no vendor-specific AI services.
 
-**Storage** is Azure Blob Storage across five containers, one set per layer. `library-raw`
-holds ingested source documents and a source registry; `library-wiki` holds current wiki
-pages, a version history directory, a human-readable catalogue (`index.md`), a
-machine-readable registry (`manifest.json`), and append-only logs (these two are Layer 2).
-`library-schemas` holds the optional per-domain schema files that configure Layer 2
-governance. `library-rules` holds the Layer 1 deterministic rulesets (`{domain}.rules.json`),
-and `library-rdf` holds the Layer 3 Turtle reasoning maps (`{domain}.ttl`). Each layer's
-artifacts live in their own container so they can be keyed and administered separately.
+**Storage** is Azure Blob Storage across five containers, one set per layer. `library-raw` holds ingested source documents and a source registry; `library-wiki` holds current wiki pages, a version history directory, a human-readable catalogue (`index.md`), a machine-readable registry (`manifest.json`), and append-only logs (these two are Layer 2). `library-schemas` holds the optional per-domain schema files that configure Layer 2 governance. `library-rules` holds the Layer 1 deterministic rulesets (`{domain}.rules.json`), and `library-rdf` holds the Layer 3 Turtle reasoning maps (`{domain}.ttl`). Each layer’s artifacts live in their own container so they can be keyed and administered separately.
 
-**Vector search** uses Qdrant. Each knowledge point stores a dense semantic vector
-and a sparse keyword vector. Queries generate both and fuse the results using
-Reciprocal Rank Fusion. This is what makes precise terminology surface reliably
-alongside conceptual similarity matches.
+**Vector search** uses Qdrant. Each knowledge point stores a dense semantic vector and a sparse keyword vector. Queries generate both and fuse the results using Reciprocal Rank Fusion. This is what makes precise terminology surface reliably alongside conceptual similarity matches.
 
 **Embeddings** use OpenAI `text-embedding-3-small` (1536 dimensions).
 
-**Transport** is JSON-RPC 2.0 over a single HTTP POST endpoint. Stateless — no
-sessions, no streaming. Every request is self-contained, which suits the Azure
-Functions consumption plan where instances may scale to zero between calls.
+**Transport** is JSON-RPC 2.0 over a single HTTP POST endpoint. Stateless — no sessions, no streaming. Every request is self-contained, which suits the Azure Functions consumption plan where instances may scale to zero between calls.
 
-**Operating surfaces (multiple MCP endpoints).** The app exposes one read-only
-**consumption** endpoint plus three per-layer **admin** endpoints, each a separate MCP
-server (its own `serverInfo.name`, its own function key in production). This is part of the
-three-layer "Sovereign AI" architecture — see [`docs/sovereign-architecture.md`](./docs/sovereign-architecture.md).
+**Operating surfaces (multiple MCP endpoints).** The app exposes one read-only **consumption** endpoint plus three per-layer **admin** endpoints, each a separate MCP server (its own `serverInfo.name`, its own function key in production). This is part of the “Sovereign AI” architecture — see [`docs/sovereign-architecture.md`](docs/sovereign-architecture.md).
 
-| Route | serverInfo.name | Tools |
-|---|---|---|
-| `POST /api/mcp` | `library-consumption` | `library_ping`, `library_info`, `library_query`, `library_resolve`, `library_lint` |
-| `POST /api/mcp-library` | `library-admin` | `library_ping`, `library_info`, `library_write` (Layer 2) |
-| `POST /api/mcp-rules` | `rules-admin` | `library_ping`, `library_info`, `library_update_rules` (Layer 1) |
-| `POST /api/mcp-rdf` | `rdf-admin` | `library_ping`, `library_info`, `library_update_reasoning` (Layer 3) |
+|Route                  |serverInfo.name      |Tools                                                                             |
+|-----------------------|---------------------|----------------------------------------------------------------------------------|
+|`POST /api/mcp`        |`library-consumption`|`library_ping`, `library_info`, `library_query`, `library_resolve`, `library_lint`|
+|`POST /api/mcp-library`|`library-admin`      |`library_ping`, `library_info`, `library_write` (Layer 2)                         |
+|`POST /api/mcp-rules`  |`rules-admin`        |`library_ping`, `library_info`, `library_update_rules` (Layer 1)                  |
+|`POST /api/mcp-rdf`    |`rdf-admin`          |`library_ping`, `library_info`, `library_update_reasoning` (Layer 3)              |
 
-`library_info` reads across all three layers (`resource: instructions | schema | pages |
-page | rules | reasoning`). `library_resolve` composes Layer 1 eligibility, Layer 2
-context, and Layer 3 answer-shape into one governed answer package. Admin routes mutate the
-highest-trust artifacts (the rule Constitution and the reasoning map) — key them and never
-expose them to agent consumers. Admin routes use flat `/api/mcp-*` paths because Azure
-Functions reserves the `/admin` namespace for its own host API.
+`library_info` reads across all three layers (`resource: instructions | schema | pages | page | rules | reasoning | domains | governance | tool_versions`). `library_resolve` composes Layer 1 eligibility, Layer 2 context, and Layer 3 answer-shape into one governed answer package. Admin routes mutate the highest-trust artifacts (the rule Constitution and the reasoning map) — key them and never expose them to agent consumers. Admin routes use flat `/api/mcp-*` paths because Azure Functions reserves the `/admin` namespace for its own host API.
 
-> ⚠️ **Key the admin routes before production.** All four routes ship `authLevel:
-> 'anonymous'` at MVP. Deployed as-is, `/api/mcp-library`, `/api/mcp-rules`, and
-> `/api/mcp-rdf` are **public, unauthenticated mutation endpoints** (they can update and
-> delete existing pages, rules, and reasoning maps). Before the production app, switch the
-> admin routes to `authLevel: 'function'` (in `createMcpFunction`, `src/functions/mcp.ts`)
-> or front them with APIM / Easy Auth. Note the deploy workflow auto-publishes on push to
-> `main`, so do not merge to `main` until the admin routes are locked down.
+> ⚠️ **Key the admin routes before production.** All four routes ship `authLevel: 'anonymous'` at MVP. Deployed as-is, `/api/mcp-library`, `/api/mcp-rules`, and `/api/mcp-rdf` are **public, unauthenticated mutation endpoints** (they can update and delete existing pages, rules, and reasoning maps). Before the production app, switch the admin routes to `authLevel: 'function'` (in `createMcpFunction`, `src/functions/mcp.ts`) or front them with APIM / Easy Auth. Note the deploy workflow auto-publishes on push to `main`, so do not merge to `main` until the admin routes are locked down.
 
 ```
 src/
@@ -454,28 +256,25 @@ src/
 
 ## Configuration
 
-Set these as Application settings on the Function App. Copy
-`local.settings.json.example` for local development.
+Set these as Application settings on the Function App. Copy `local.settings.json.example` for local development.
 
-|Setting                            |Required|Default                 |Notes                                               |
-|-----------------------------------|:------:|------------------------|----------------------------------------------------|
-|`LIBRARY_STORAGE_CONNECTION_STRING`|✅       |—                       |Blob storage account connection string              |
-|`QDRANT_URL`                       |✅       |—                       |Cluster endpoint, e.g. `https://xxxx.qdrant.io:6333`|
-|`QDRANT_API_KEY`                   |✅       |—                       |Qdrant cluster API key                              |
-|`OPENAI_API_KEY`                   |✅       |—                       |OpenAI API key for embeddings                       |
-|`LIBRARY_RAW_CONTAINER`            |        |`library-raw`           |                                                    |
-|`LIBRARY_WIKI_CONTAINER`           |        |`library-wiki`          |                                                    |
-|`LIBRARY_SCHEMA_CONTAINER`         |        |`library-schemas`       |                                                    |
-|`LIBRARY_RULES_CONTAINER`          |        |`library-rules`         |Layer 1 deterministic rulesets (`{domain}.rules.json`).|
-|`LIBRARY_RDF_CONTAINER`            |        |`library-rdf`           |Layer 3 reasoning maps (`{domain}.ttl`).            |
-|`LIBRARY_RDF_ENGINE`               |        |`oxigraph`              |`oxigraph` (real SPARQL) or `n3` (triple-traversal fallback).|
-|`QDRANT_COLLECTION`                |        |`library`               |                                                    |
-|`EMBEDDING_MODEL`                  |        |`text-embedding-3-small`|                                                    |
-|`LIBRARY_MCP_MODE`                 |        |`read_only`             |Legacy health-report flag; surfaces are now route-based (see below).|
+|Setting                            |Required|Default                 |Notes                                                           |
+|-----------------------------------|--------|------------------------|----------------------------------------------------------------|
+|`LIBRARY_STORAGE_CONNECTION_STRING`|✅       |—                       |Blob storage account connection string                          |
+|`QDRANT_URL`                       |✅       |—                       |Cluster endpoint, e.g. `https://xxxx.qdrant.io:6333`            |
+|`QDRANT_API_KEY`                   |✅       |—                       |Qdrant cluster API key                                          |
+|`OPENAI_API_KEY`                   |✅       |—                       |OpenAI API key for embeddings                                   |
+|`LIBRARY_RAW_CONTAINER`            |        |`library-raw`           |                                                                |
+|`LIBRARY_WIKI_CONTAINER`           |        |`library-wiki`          |                                                                |
+|`LIBRARY_SCHEMA_CONTAINER`         |        |`library-schemas`       |                                                                |
+|`LIBRARY_RULES_CONTAINER`          |        |`library-rules`         |Layer 1 deterministic rulesets (`{domain}.rules.json`).         |
+|`LIBRARY_RDF_CONTAINER`            |        |`library-rdf`           |Layer 3 reasoning maps (`{domain}.ttl`).                        |
+|`LIBRARY_RDF_ENGINE`               |        |`oxigraph`              |`oxigraph` (real SPARQL) or `n3` (triple-traversal fallback).   |
+|`QDRANT_COLLECTION`                |        |`library`               |                                                                |
+|`EMBEDDING_MODEL`                  |        |`text-embedding-3-small`|                                                                |
+|`LIBRARY_MCP_MODE`                 |        |`read_only`             |Legacy health-report flag; surfaces are route-based (see above).|
 
-The Qdrant `library` collection must already exist with the correct vector
-configuration before first use. The app verifies this on startup and errors clearly
-if it is missing or misconfigured. It never creates the collection.
+The Qdrant `library` collection must already exist with the correct vector configuration before first use. The app verifies this on startup and errors clearly if it is missing or misconfigured. It never creates the collection.
 
 Blob containers are created automatically on first use.
 
@@ -513,30 +312,21 @@ npm run smoke:entrypoint   # verifies package.json main resolves and imports cle
 func azure functionapp publish <app-name>
 ```
 
-Compiled output ships from `dist/`. `.funcignore` excludes source TypeScript,
-`local.settings.json`, and tests from the deployment package.
+Compiled output ships from `dist/`. `.funcignore` excludes source TypeScript, `local.settings.json`, and tests from the deployment package.
 
-> ⚠️ Before deploying the production app, lock down the admin routes (`/api/mcp-library`,
-> `/api/mcp-rules`, `/api/mcp-rdf`) — see the warning under **Architecture → Operating
-> surfaces**. They are anonymous mutation endpoints at MVP.
+> ⚠️ Before deploying the production app, lock down the admin routes (`/api/mcp-library`, `/api/mcp-rules`, `/api/mcp-rdf`) — see the warning under **Architecture → Operating surfaces**. They are anonymous mutation endpoints at MVP.
 
-Endpoints: consumption `POST https://<app-name>.azurewebsites.net/api/mcp`; admin
-`/api/mcp-library`, `/api/mcp-rules`, `/api/mcp-rdf`.
+Endpoints: consumption `POST https://<app-name>.azurewebsites.net/api/mcp`; admin `/api/mcp-library`, `/api/mcp-rules`, `/api/mcp-rdf`.
 
-If Azure reports `AZFD0005` with `node exited with code 1`, run
-`npm run smoke:entrypoint` locally first. This rebuilds TypeScript and loads every
-compiled entry point. A missing `dist` file or top-level startup exception fails
-locally before Azure has to discover it.
+If Azure reports `AZFD0005` with `node exited with code 1`, run `npm run smoke:entrypoint` locally first. This rebuilds TypeScript and loads every compiled entry point. A missing `dist` file or top-level startup exception fails locally before Azure has to discover it.
 
 -----
 
 ## Connect as an MCP server
 
-Add it to your MCP client as an **HTTP** server (not SSE) pointing at
-`https://<app-name>.azurewebsites.net/api/mcp`.
+Add it to your MCP client as an **HTTP** server (not SSE) pointing at `https://<app-name>.azurewebsites.net/api/mcp`.
 
-The endpoint is anonymous at MVP. Put a function key, API Management layer, or
-App Service Easy Auth in front before loading anything sensitive.
+The endpoint is anonymous at MVP. Put a function key, API Management layer, or App Service Easy Auth in front before loading anything sensitive.
 
 -----
 
@@ -544,14 +334,11 @@ App Service Easy Auth in front before loading anything sensitive.
 
 Once connected, run the full lifecycle to prove the system end to end.
 
-1. **Ingest** a source — `library_write` (`operation: ingest`, `source_type: primary`,
-   `domain: ai-knowledge-layer`).
+1. **Ingest** a source — `library_write` (`operation: ingest`, `source_type: primary`, `domain: ai-knowledge-layer`) against the library-admin endpoint (`POST /api/mcp-library`); mutating tools live there, not on the consumption surface.
 1. **Query** raw chunks — `library_query` with `scope: raw` to confirm chunks return.
-1. Switch to librarian mode (`LIBRARY_MCP_MODE=librarian`) before write tests.
 1. **Create** a curated page — `library_write` (`operation: update_page`).
 1. **Query** the wiki — `library_query` (default `scope: wiki`) returns the page.
-1. **Update** the page — confirm the previous version lands in `history/`, the
-   `manifest.json` `updated` timestamp changes, and the Qdrant payload `updated` changes.
+1. **Update** the page — confirm the previous version lands in `history/`, the `manifest.json` `updated` timestamp changes, and the Qdrant payload `updated` changes.
 1. **Lint** — `library_lint` shows no `stale_embedding` for the updated page.
 
 -----
@@ -560,25 +347,14 @@ Once connected, run the full lifecycle to prove the system end to end.
 
 Before the critical content write fails: `ok: false` with an error code.
 
-After the critical write succeeds: `ok: true` with `warnings[]` and explicit boolean
-flags. Secondary failures (embedding, manifest, index, log) never turn a successful
-write into a total failure. `library_lint` detects and reports incomplete secondary
-state. Recovery is the librarian’s decision.
+After the critical write succeeds: `ok: true` with `warnings[]` and explicit boolean flags. Secondary failures (embedding, manifest, index, log) never turn a successful write into a total failure. `library_lint` detects and reports incomplete secondary state. Recovery is the librarian’s decision.
 
 Log failures are always warnings, never errors.
 
-ETag conflicts on shared files return `CONFLICT` with no silent retries. The caller
-decides.
+ETag conflicts on shared files return `CONFLICT` with no silent retries. The caller decides.
 
-Domain errors (`VALIDATION_ERROR`, `STORAGE_ERROR`, `EMBEDDING_ERROR`, `CONFLICT`,
-`NOT_FOUND`) ride inside a successful `tools/call` result with `isError: true`. They
-are not JSON-RPC protocol errors.
+Domain errors (`VALIDATION_ERROR`, `STORAGE_ERROR`, `EMBEDDING_ERROR`, `CONFLICT`, `NOT_FOUND`) ride inside a successful `tools/call` result with `isError: true`. They are not JSON-RPC protocol errors.
 
 -----
 
-See [`CLAUDE.md`](./CLAUDE.md) for the full build schema, wire contract, tool
-specifications, and operating doctrine;
-[`docs/sovereign-architecture.md`](./docs/sovereign-architecture.md) for the three-layer
-design; and [`docs/data-correction-plan.md`](./docs/data-correction-plan.md) for the
-estate-wide process to find and fix data gaps (governance metadata, domain-string drift)
-using the coverage inventory and the metadata patch path.
+See [`CLAUDE.md`](CLAUDE.md) for the full build schema, wire contract, tool specifications, and operating doctrine; [`docs/sovereign-architecture.md`](docs/sovereign-architecture.md) for the governing-layer design and the worked council-tax / bailiff walkthrough; and [`docs/data-correction-plan.md`](docs/data-correction-plan.md) for the estate-wide process to find and fix data gaps (governance metadata, domain-string drift) using the coverage inventory and the metadata patch path.
